@@ -16,6 +16,9 @@ public class HandposeTimeline : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new[]
             {
+                "AnimationBlueprintLibrary",
+                "AssetRegistry",
+                "ContentBrowser",
                 "CoreUObject",
                 "Engine",
                 "HandshapeSegmentationAdapter",

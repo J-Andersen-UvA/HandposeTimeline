@@ -1,0 +1,58 @@
+#pragma once
+
+#include "HandposeTimelineSegment.h"
+#include "Widgets/SCompoundWidget.h"
+
+class SHorizontalBox;
+class STextBlock;
+class AActor;
+class UAnimSequenceBase;
+class USkeletalMeshComponent;
+
+class SHandposeTimelineWidget : public SCompoundWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SHandposeTimelineWidget)
+    {
+    }
+    SLATE_END_ARGS()
+
+    void Construct(const FArguments& arguments);
+    virtual void Tick(
+        const FGeometry& allottedGeometry,
+        double currentTime,
+        float deltaTime) override;
+
+private:
+    FReply onLoadAnimationClicked();
+    FReply onUseSelectedActorClicked();
+    FReply onLoopClicked();
+    FReply onSpeedClicked();
+    FReply onSegmentClicked(int32 segmentIndex);
+    void onZoomChanged(float sliderValue);
+    void loadAnimation(UAnimSequenceBase* animation);
+    void previewSegment(const FHandposeTimelineSegment& segment);
+    void rebuildTimeline();
+    TArray<FName> getSegmentationBoneNames(const UAnimSequenceBase& animation) const;
+    TSharedRef<SWidget> createSegmentWidget(
+        const FHandposeTimelineSegment& segment,
+        int32 segmentIndex);
+
+    TWeakObjectPtr<UAnimSequenceBase> loadedAnimation;
+    TWeakObjectPtr<AActor> previewActor;
+    TWeakObjectPtr<USkeletalMeshComponent> previewSkeletalMeshComponent;
+    TArray<FHandposeTimelineSegment> segments;
+    int32 selectedSegmentIndex = INDEX_NONE;
+    float timelineZoom = 1.0f;
+    float previewStartTimeSeconds = 0.0f;
+    float previewEndTimeSeconds = 0.0f;
+    float previewPlayRate = 1.0f;
+    bool isPreviewingSegment = false;
+    bool shouldLoopSegmentPreview = false;
+    TSharedPtr<SHorizontalBox> segmentContainer;
+    TSharedPtr<STextBlock> animationNameText;
+    TSharedPtr<STextBlock> actorNameText;
+    TSharedPtr<STextBlock> statusText;
+    TSharedPtr<STextBlock> speedText;
+    TSharedPtr<STextBlock> zoomText;
+};

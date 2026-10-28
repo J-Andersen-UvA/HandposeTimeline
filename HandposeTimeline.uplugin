@@ -11,15 +11,14 @@
   "Installed": false,
   "Modules": [
     {
+      "Name": "HandshapeSegmentationAdapter",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    },
+    {
       "Name": "HandposeTimeline",
       "Type": "Editor",
       "LoadingPhase": "Default"
-    }
-  ],
-  "Plugins": [
-    {
-      "Name": "HandshapeSegmentationAdapter",
-      "Enabled": true
     }
   ]
 }

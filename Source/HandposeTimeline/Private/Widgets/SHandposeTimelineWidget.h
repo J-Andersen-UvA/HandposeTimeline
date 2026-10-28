@@ -21,6 +21,9 @@ public:
         const FGeometry& allottedGeometry,
         double currentTime,
         float deltaTime) override;
+    virtual FReply OnPreviewKeyDown(
+        const FGeometry& myGeometry,
+        const FKeyEvent& keyEvent) override;
 
 private:
     FReply onLoadAnimationClicked();
@@ -31,6 +34,7 @@ private:
     FReply onPauseClicked();
     void onSegmentSelected(int32 segmentIndex);
     void onPlayheadScrubbed(float timeSeconds);
+    void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);
     void loadAnimation(UAnimSequenceBase* animation);
     void selectSegment(int32 segmentIndex, bool shouldPreview);

@@ -22,6 +22,7 @@ public class HandposeTimeline : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "HandshapeSegmentationAdapter",
+                "InputCore",
                 "Slate",
                 "SlateCore",
                 "ToolMenus",

@@ -12,6 +12,7 @@
 #include "HandshapeSegmentationBlueprintLibrary.h"
 #include "HandshapeSegmentationTypes.h"
 #include "IContentBrowserSingleton.h"
+#include "InputCoreTypes.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
@@ -201,6 +202,23 @@ void SHandposeTimelineWidget::Tick(
     playbackController->tick();
 }
 
+FReply SHandposeTimelineWidget::OnPreviewKeyDown(
+    const FGeometry& myGeometry,
+    const FKeyEvent& keyEvent)
+{
+    if (keyEvent.GetKey() == EKeys::Left)
+    {
+        stepFrame(-1);
+        return FReply::Handled();
+    }
+    if (keyEvent.GetKey() == EKeys::Right)
+    {
+        stepFrame(1);
+        return FReply::Handled();
+    }
+    return SCompoundWidget::OnPreviewKeyDown(myGeometry, keyEvent);
+}
+
 FReply SHandposeTimelineWidget::onLoadAnimationClicked()
 {
     FOpenAssetDialogConfig dialogConfig;
@@ -300,6 +318,22 @@ void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)
 {
     playbackController->scrubTo(timeSeconds);
+}
+
+void SHandposeTimelineWidget::stepFrame(const int32 frameOffset)
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || !animation->GetSamplingFrameRate().IsValid())
+    {
+        return;
+    }
+
+    const FFrameRate frameRate = animation->GetSamplingFrameRate();
+    const int32 currentFrame = FMath::RoundToInt(
+        getCurrentTimeSeconds() * frameRate.AsDecimal());
+    const int32 lastFrame = FMath::Max(0, animation->GetNumberOfSampledKeys() - 1);
+    const int32 targetFrame = FMath::Clamp(currentFrame + frameOffset, 0, lastFrame);
+    onPlayheadScrubbed(static_cast<float>(frameRate.AsSeconds(targetFrame)));
 }
 
 void SHandposeTimelineWidget::onZoomChanged(const float sliderValue)

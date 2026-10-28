@@ -1,0 +1,25 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Handpose Timeline",
+  "Description": "Editor tools for creating and editing hand poses on animation timelines.",
+  "Category": "Animation",
+  "CreatedBy": "ContextOptimizing",
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "HandposeTimeline",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "HandshapeSegmentationAdapter",
+      "Enabled": true
+    }
+  ]
+}

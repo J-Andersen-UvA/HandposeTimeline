@@ -29,6 +29,7 @@ namespace
 {
 constexpr float pixelsPerSecond = 180.0f;
 constexpr float minimumSegmentWidth = 72.0f;
+constexpr float minimumGapWidth = 8.0f;
 constexpr float minimumTimelineZoom = 1.0f;
 constexpr float maximumTimelineZoom = 5.0f;
 }
@@ -414,39 +415,14 @@ FReply SHandposeTimelineWidget::onSegmentClicked(const int32 segmentIndex)
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float sliderValue)
 {
     UAnimSequenceBase* animation = loadedAnimation.Get();
-    if (animation == nullptr || segments.IsEmpty())
-    {
-        return;
-    }
-
-    const FFrameRate frameRate = animation->GetSamplingFrameRate();
-    if (!frameRate.IsValid())
+    if (animation == nullptr || timelineBlocks.IsEmpty())
     {
         return;
     }
 
     const float targetOffset = FMath::Clamp(sliderValue, 0.0f, 1.0f) *
         getTotalTimelineWidth();
-    float segmentOffset = 0.0f;
-    currentPreviewTimeSeconds = animation->GetPlayLength();
-    for (const FHandposeTimelineSegment& segment : segments)
-    {
-        const float segmentWidth = getSegmentWidth(segment);
-        if (targetOffset <= segmentOffset + segmentWidth + 2.0f)
-        {
-            const float alpha = FMath::Clamp(
-                (targetOffset - segmentOffset - 1.0f) / segmentWidth,
-                0.0f,
-                1.0f);
-            const float startTime = static_cast<float>(
-                frameRate.AsSeconds(segment.startFrame));
-            const float endTime = static_cast<float>(
-                frameRate.AsSeconds(segment.endFrame + 1));
-            currentPreviewTimeSeconds = FMath::Lerp(startTime, endTime, alpha);
-            break;
-        }
-        segmentOffset += segmentWidth + 2.0f;
-    }
+    currentPreviewTimeSeconds = getTimeAtTimelineOffset(targetOffset);
 
     if (USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get())
     {
@@ -463,6 +439,10 @@ void SHandposeTimelineWidget::onPlayheadScrubbed(const float sliderValue)
             skeletalMeshComponent->RefreshBoneTransforms(nullptr);
             skeletalMeshComponent->UpdateBounds();
             skeletalMeshComponent->MarkRenderDynamicDataDirty();
+            if (GEditor != nullptr)
+            {
+                GEditor->RedrawLevelEditingViewports(false);
+            }
         }
     }
 
@@ -625,7 +605,8 @@ void SHandposeTimelineWidget::rebuildTimeline()
     }
 
     segmentContainer->ClearChildren();
-    if (segments.IsEmpty())
+    buildTimelineBlocks();
+    if (timelineBlocks.IsEmpty())
     {
         segmentContainer->AddSlot()
         .AutoWidth()
@@ -638,14 +619,54 @@ void SHandposeTimelineWidget::rebuildTimeline()
         return;
     }
 
-    for (int32 segmentIndex = 0; segmentIndex < segments.Num(); ++segmentIndex)
+    for (const FTimelineBlock& block : timelineBlocks)
     {
         segmentContainer->AddSlot()
         .AutoWidth()
         .Padding(1.0f, 0.0f)
         [
-            createSegmentWidget(segments[segmentIndex], segmentIndex)
+            block.isGap()
+                ? createGapWidget(block)
+                : createSegmentWidget(segments[block.segmentIndex], block.segmentIndex)
         ];
+    }
+}
+
+void SHandposeTimelineWidget::buildTimelineBlocks()
+{
+    timelineBlocks.Reset();
+
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr)
+    {
+        return;
+    }
+
+    const int32 lastAnimationFrame = animation->GetNumberOfSampledKeys() - 1;
+    if (lastAnimationFrame < 0)
+    {
+        return;
+    }
+
+    int32 nextFrame = 0;
+    for (int32 segmentIndex = 0; segmentIndex < segments.Num(); ++segmentIndex)
+    {
+        const FHandposeTimelineSegment& segment = segments[segmentIndex];
+        const int32 segmentStart = FMath::Clamp(segment.startFrame, 0, lastAnimationFrame);
+        const int32 segmentEnd = FMath::Clamp(segment.endFrame, segmentStart, lastAnimationFrame);
+
+        if (segmentStart > nextFrame)
+        {
+            timelineBlocks.Add({nextFrame, segmentStart - 1, INDEX_NONE});
+        }
+
+        timelineBlocks.Add({segmentStart, segmentEnd, segmentIndex});
+        nextFrame = FMath::Max(nextFrame, segmentEnd + 1);
+    }
+
+    if (nextFrame <= lastAnimationFrame)
+    {
+        timelineBlocks.Add({nextFrame, lastAnimationFrame, INDEX_NONE});
     }
 }
 
@@ -755,6 +776,24 @@ TSharedRef<SWidget> SHandposeTimelineWidget::createSegmentWidget(
         ];
 }
 
+TSharedRef<SWidget> SHandposeTimelineWidget::createGapWidget(
+    const FTimelineBlock& block) const
+{
+    return SNew(SBox)
+        .WidthOverride(getTimelineBlockWidth(block))
+        .HeightOverride(112.0f)
+        [
+            SNew(SBorder)
+            .BorderImage(FAppStyle::GetBrush(TEXT("WhiteBrush")))
+            .BorderBackgroundColor(FLinearColor(0.12f, 0.12f, 0.12f, 1.0f))
+            .Padding(6.0f)
+            .ToolTipText(FText::Format(
+                LOCTEXT("UnsegmentedFramesTooltip", "Unsegmented frames\nFrameRange\n{0}-{1}"),
+                FText::AsNumber(block.startFrame),
+                FText::AsNumber(block.endFrame)))
+        ];
+}
+
 float SHandposeTimelineWidget::getSegmentWidth(
     const FHandposeTimelineSegment& segment) const
 {
@@ -763,10 +802,31 @@ float SHandposeTimelineWidget::getSegmentWidth(
         static_cast<float>(segment.durationSeconds) * pixelsPerSecond * timelineZoom);
 }
 
+float SHandposeTimelineWidget::getTimelineBlockWidth(
+    const FTimelineBlock& block) const
+{
+    if (!block.isGap() && segments.IsValidIndex(block.segmentIndex))
+    {
+        return getSegmentWidth(segments[block.segmentIndex]);
+    }
+
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || !animation->GetSamplingFrameRate().IsValid())
+    {
+        return minimumGapWidth;
+    }
+
+    const double durationSeconds = animation->GetSamplingFrameRate().AsSeconds(
+        block.endFrame - block.startFrame + 1);
+    return FMath::Max(
+        minimumGapWidth,
+        static_cast<float>(durationSeconds) * pixelsPerSecond * timelineZoom);
+}
+
 float SHandposeTimelineWidget::getPlayheadOffset() const
 {
     UAnimSequenceBase* animation = loadedAnimation.Get();
-    if (animation == nullptr || segments.IsEmpty())
+    if (animation == nullptr || timelineBlocks.IsEmpty())
     {
         return 0.0f;
     }
@@ -778,11 +838,11 @@ float SHandposeTimelineWidget::getPlayheadOffset() const
     }
 
     float offset = 0.0f;
-    for (const FHandposeTimelineSegment& segment : segments)
+    for (const FTimelineBlock& block : timelineBlocks)
     {
-        const float segmentWidth = getSegmentWidth(segment);
-        const float startTime = static_cast<float>(frameRate.AsSeconds(segment.startFrame));
-        const float endTime = static_cast<float>(frameRate.AsSeconds(segment.endFrame + 1));
+        const float blockWidth = getTimelineBlockWidth(block);
+        const float startTime = static_cast<float>(frameRate.AsSeconds(block.startFrame));
+        const float endTime = static_cast<float>(frameRate.AsSeconds(block.endFrame + 1));
         if (currentPreviewTimeSeconds <= endTime)
         {
             const float duration = FMath::Max(endTime - startTime, UE_SMALL_NUMBER);
@@ -790,9 +850,9 @@ float SHandposeTimelineWidget::getPlayheadOffset() const
                 (currentPreviewTimeSeconds - startTime) / duration,
                 0.0f,
                 1.0f);
-            return offset + 1.0f + alpha * segmentWidth;
+            return offset + 1.0f + alpha * blockWidth;
         }
-        offset += segmentWidth + 2.0f;
+        offset += blockWidth + 2.0f;
     }
     return offset;
 }
@@ -808,11 +868,40 @@ float SHandposeTimelineWidget::getPlayheadSliderValue() const
 float SHandposeTimelineWidget::getTotalTimelineWidth() const
 {
     float width = 0.0f;
-    for (const FHandposeTimelineSegment& segment : segments)
+    for (const FTimelineBlock& block : timelineBlocks)
     {
-        width += getSegmentWidth(segment) + 2.0f;
+        width += getTimelineBlockWidth(block) + 2.0f;
     }
     return width;
+}
+
+float SHandposeTimelineWidget::getTimeAtTimelineOffset(const float offset) const
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || !animation->GetSamplingFrameRate().IsValid())
+    {
+        return 0.0f;
+    }
+
+    const FFrameRate frameRate = animation->GetSamplingFrameRate();
+    float blockOffset = 0.0f;
+    for (const FTimelineBlock& block : timelineBlocks)
+    {
+        const float blockWidth = getTimelineBlockWidth(block);
+        if (offset <= blockOffset + blockWidth + 2.0f)
+        {
+            const float alpha = FMath::Clamp(
+                (offset - blockOffset - 1.0f) / blockWidth,
+                0.0f,
+                1.0f);
+            const float startTime = static_cast<float>(frameRate.AsSeconds(block.startFrame));
+            const float endTime = static_cast<float>(frameRate.AsSeconds(block.endFrame + 1));
+            return FMath::Lerp(startTime, endTime, alpha);
+        }
+        blockOffset += blockWidth + 2.0f;
+    }
+
+    return animation->GetPlayLength();
 }
 
 FText SHandposeTimelineWidget::getTimecodeText() const

@@ -24,6 +24,18 @@ public:
         float deltaTime) override;
 
 private:
+    struct FTimelineBlock
+    {
+        int32 startFrame = INDEX_NONE;
+        int32 endFrame = INDEX_NONE;
+        int32 segmentIndex = INDEX_NONE;
+
+        bool isGap() const
+        {
+            return segmentIndex == INDEX_NONE;
+        }
+    };
+
     FReply onLoadAnimationClicked();
     FReply onUseSelectedActorClicked();
     FReply onLoopClicked();
@@ -36,21 +48,26 @@ private:
     void loadAnimation(UAnimSequenceBase* animation);
     void previewSegment(const FHandposeTimelineSegment& segment);
     void selectSegment(int32 segmentIndex, bool shouldPreview);
+    void buildTimelineBlocks();
     void rebuildTimeline();
     float getSegmentWidth(const FHandposeTimelineSegment& segment) const;
+    float getTimelineBlockWidth(const FTimelineBlock& block) const;
     float getPlayheadOffset() const;
     float getPlayheadSliderValue() const;
     float getTotalTimelineWidth() const;
+    float getTimeAtTimelineOffset(float offset) const;
     FText getTimecodeText() const;
     TArray<FName> getSegmentationBoneNames(const UAnimSequenceBase& animation) const;
     TSharedRef<SWidget> createSegmentWidget(
         const FHandposeTimelineSegment& segment,
         int32 segmentIndex);
+    TSharedRef<SWidget> createGapWidget(const FTimelineBlock& block) const;
 
     TWeakObjectPtr<UAnimSequenceBase> loadedAnimation;
     TWeakObjectPtr<AActor> previewActor;
     TWeakObjectPtr<USkeletalMeshComponent> previewSkeletalMeshComponent;
     TArray<FHandposeTimelineSegment> segments;
+    TArray<FTimelineBlock> timelineBlocks;
     int32 selectedSegmentIndex = INDEX_NONE;
     float timelineZoom = 1.0f;
     float previewStartTimeSeconds = 0.0f;

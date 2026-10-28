@@ -11,6 +11,7 @@
 #include "GameFramework/Actor.h"
 #include "HandshapeSegmentationBlueprintLibrary.h"
 #include "HandshapeSegmentationTypes.h"
+#include "HandposeTimelineConfig.h"
 #include "IContentBrowserSingleton.h"
 #include "InputCoreTypes.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
@@ -42,6 +43,25 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
         .Padding(8.0f)
         [
             SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("LoadConfig", "Load Config"))
+                .ToolTipText(LOCTEXT(
+                    "LoadConfigTooltip",
+                    "Choose the segmentation and handshape source configuration."))
+                .OnClicked(this, &SHandposeTimelineWidget::onLoadConfigClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(8.0f, 0.0f, 12.0f, 0.0f)
+            [
+                SAssignNew(configNameText, STextBlock)
+                .Text(LOCTEXT("NoConfig", "Default settings"))
+            ]
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
@@ -156,18 +176,11 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .AutoWidth()
             [
                 SNew(SButton)
-                .Text(LOCTEXT("PlayTimeline", "Play"))
-                .ToolTipText(LOCTEXT("PlayTimelineTooltip", "Play the full animation from the playhead."))
-                .OnClicked(this, &SHandposeTimelineWidget::onPlayClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .Padding(4.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("PauseTimeline", "Pause"))
-                .ToolTipText(LOCTEXT("PauseTimelineTooltip", "Pause playback at the current playhead position."))
-                .OnClicked(this, &SHandposeTimelineWidget::onPauseClicked)
+                .Text(this, &SHandposeTimelineWidget::getPlayPauseButtonText)
+                .ToolTipText(LOCTEXT(
+                    "PlayPauseTimelineTooltip",
+                    "Play the full animation from the playhead or pause active playback."))
+                .OnClicked(this, &SHandposeTimelineWidget::onPlayPauseClicked)
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -237,6 +250,24 @@ FReply SHandposeTimelineWidget::onLoadAnimationClicked()
     return FReply::Handled();
 }
 
+FReply SHandposeTimelineWidget::onLoadConfigClicked()
+{
+    FOpenAssetDialogConfig dialogConfig;
+    dialogConfig.DialogTitleOverride = LOCTEXT("SelectConfig", "Select Handpose Timeline Config");
+    dialogConfig.AssetClassNames.Add(UHandposeTimelineConfig::StaticClass()->GetClassPathName());
+    dialogConfig.bAllowMultipleSelection = false;
+
+    FContentBrowserModule& contentBrowserModule =
+        FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+    const TArray<FAssetData> selectedAssets =
+        contentBrowserModule.Get().CreateModalOpenAssetDialog(dialogConfig);
+    if (!selectedAssets.IsEmpty())
+    {
+        loadConfig(Cast<UHandposeTimelineConfig>(selectedAssets[0].GetAsset()));
+    }
+    return FReply::Handled();
+}
+
 FReply SHandposeTimelineWidget::onUseSelectedActorClicked()
 {
     AActor* selectedActor = GEditor != nullptr
@@ -286,8 +317,14 @@ FReply SHandposeTimelineWidget::onSpeedClicked()
     return FReply::Handled();
 }
 
-FReply SHandposeTimelineWidget::onPlayClicked()
+FReply SHandposeTimelineWidget::onPlayPauseClicked()
 {
+    if (playbackController->isPlaying())
+    {
+        playbackController->pause();
+        return FReply::Handled();
+    }
+
     const EHandposeTimelinePlaybackResult result = playbackController->playTimeline();
     if (result == EHandposeTimelinePlaybackResult::MissingAnimationOrActor)
     {
@@ -301,12 +338,6 @@ FReply SHandposeTimelineWidget::onPlayClicked()
             "IncompatibleTimelineActor",
             "The selected actor's skeletal mesh is not compatible with the loaded animation."));
     }
-    return FReply::Handled();
-}
-
-FReply SHandposeTimelineWidget::onPauseClicked()
-{
-    playbackController->pause();
     return FReply::Handled();
 }
 
@@ -362,7 +393,14 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 
     animationNameText->SetText(FText::FromString(animation->GetName()));
     FHandshapeSegmentationSettings settings;
-    settings.boneNames = getSegmentationBoneNames(*animation);
+    if (const UHandposeTimelineConfig* config = loadedConfig.Get())
+    {
+        settings = config->getSegmentationSettings();
+    }
+    else
+    {
+        settings.boneNames = getSegmentationBoneNames(*animation);
+    }
     if (settings.boneNames.IsEmpty())
     {
         statusText->SetText(LOCTEXT(
@@ -400,6 +438,34 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
         FText::AsNumber(segments.Num()),
         FText::AsNumber(settings.boneNames.Num())));
     refreshTimeline();
+}
+
+void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
+{
+    loadedConfig = config;
+    if (config == nullptr)
+    {
+        configNameText->SetText(LOCTEXT("InvalidConfig", "Invalid config"));
+        statusText->SetText(LOCTEXT(
+            "InvalidConfigStatus",
+            "The selected asset is not a Handpose Timeline config."));
+        return;
+    }
+
+    configNameText->SetText(FText::FromString(config->GetName()));
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "ConfigLoaded",
+            "Loaded {0}: {1} segmentation bones, handshape folder {2}, and {3} available handshape poses."),
+        FText::FromString(config->GetName()),
+        FText::AsNumber(config->segmentationSettings.boneNames.Num()),
+        FText::FromString(config->getHandshapeContentPath()),
+        FText::AsNumber(config->getHandshapePoses().Num())));
+
+    if (loadedAnimation.IsValid())
+    {
+        loadAnimation(loadedAnimation.Get());
+    }
 }
 
 void SHandposeTimelineWidget::selectSegment(
@@ -464,6 +530,13 @@ float SHandposeTimelineWidget::getCurrentTimeSeconds() const
     return playbackController.IsValid()
         ? playbackController->getCurrentTimeSeconds()
         : 0.0f;
+}
+
+FText SHandposeTimelineWidget::getPlayPauseButtonText() const
+{
+    return playbackController.IsValid() && playbackController->isPlaying()
+        ? LOCTEXT("PausePlayback", "Pause")
+        : LOCTEXT("PlayPlayback", "Play");
 }
 
 FText SHandposeTimelineWidget::getTimecodeText() const

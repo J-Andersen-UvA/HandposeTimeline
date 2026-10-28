@@ -38,6 +38,7 @@ public:
     AActor* getActor() const;
     float getCurrentTimeSeconds() const;
     float getPlayRate() const;
+    bool isPlaying() const;
     bool shouldLoop() const;
 
 private:

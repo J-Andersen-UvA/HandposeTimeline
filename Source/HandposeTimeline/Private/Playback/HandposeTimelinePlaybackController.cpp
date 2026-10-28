@@ -217,6 +217,11 @@ float FHandposeTimelinePlaybackController::getPlayRate() const
     return playRate;
 }
 
+bool FHandposeTimelinePlaybackController::isPlaying() const
+{
+    return isPreviewingSegment || isPlayingTimeline;
+}
+
 bool FHandposeTimelinePlaybackController::shouldLoop() const
 {
     return loopSegment;

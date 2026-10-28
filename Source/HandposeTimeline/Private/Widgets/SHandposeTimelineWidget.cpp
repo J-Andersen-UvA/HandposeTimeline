@@ -151,6 +151,38 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .ColorAndOpacity(FSlateColor::UseSubduedForeground())
         ]
         + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(8.0f, 0.0f, 8.0f, 8.0f)
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("PlayTimeline", "Play"))
+                .ToolTipText(LOCTEXT("PlayTimelineTooltip", "Play the full animation from the playhead."))
+                .OnClicked(this, &SHandposeTimelineWidget::onPlayClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(4.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("PauseTimeline", "Pause"))
+                .ToolTipText(LOCTEXT("PauseTimelineTooltip", "Pause playback at the current playhead position."))
+                .OnClicked(this, &SHandposeTimelineWidget::onPauseClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(12.0f, 0.0f)
+            [
+                SNew(STextBlock)
+                .Text(this, &SHandposeTimelineWidget::getTimecodeText)
+                .Font(FAppStyle::GetFontStyle(TEXT("MonospacedText")))
+            ]
+        ]
+        + SVerticalBox::Slot()
         .FillHeight(1.0f)
         .Padding(8.0f)
         [
@@ -162,7 +194,24 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 .Orientation(Orient_Horizontal)
                 + SScrollBox::Slot()
                 [
-                    SAssignNew(segmentContainer, SHorizontalBox)
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SBox)
+                        .HeightOverride(20.0f)
+                        [
+                            SNew(SSlider)
+                            .Value(this, &SHandposeTimelineWidget::getPlayheadSliderValue)
+                            .ToolTipText(LOCTEXT("PlayheadTooltip", "Drag to scrub the animation."))
+                            .OnValueChanged(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SAssignNew(segmentContainer, SHorizontalBox)
+                    ]
                 ]
             ]
         ]
@@ -179,22 +228,37 @@ void SHandposeTimelineWidget::Tick(
     SCompoundWidget::Tick(allottedGeometry, currentTime, deltaTime);
 
     USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get();
+    if ((isPreviewingSegment || isPlayingTimeline) && skeletalMeshComponent != nullptr)
+    {
+        currentPreviewTimeSeconds = skeletalMeshComponent->GetPosition();
+    }
     if (isPreviewingSegment &&
         skeletalMeshComponent != nullptr &&
-        skeletalMeshComponent->GetPosition() >= previewEndTimeSeconds)
+        currentPreviewTimeSeconds >= previewEndTimeSeconds)
     {
         if (shouldLoopSegmentPreview)
         {
             skeletalMeshComponent->SetPosition(previewStartTimeSeconds, false);
             skeletalMeshComponent->SetPlayRate(previewPlayRate);
             skeletalMeshComponent->Play(false);
+            currentPreviewTimeSeconds = previewStartTimeSeconds;
         }
         else
         {
             skeletalMeshComponent->Stop();
             skeletalMeshComponent->SetPosition(previewEndTimeSeconds, false);
+            currentPreviewTimeSeconds = previewEndTimeSeconds;
             isPreviewingSegment = false;
         }
+    }
+    else if (isPlayingTimeline &&
+        skeletalMeshComponent != nullptr &&
+        loadedAnimation.IsValid() &&
+        currentPreviewTimeSeconds >= loadedAnimation->GetPlayLength())
+    {
+        skeletalMeshComponent->Stop();
+        currentPreviewTimeSeconds = loadedAnimation->GetPlayLength();
+        isPlayingTimeline = false;
     }
 }
 
@@ -292,22 +356,118 @@ FReply SHandposeTimelineWidget::onSpeedClicked()
     return FReply::Handled();
 }
 
+FReply SHandposeTimelineWidget::onPlayClicked()
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get();
+    if (animation == nullptr || skeletalMeshComponent == nullptr)
+    {
+        statusText->SetText(LOCTEXT(
+            "TimelinePlaybackRequiresActor",
+            "Load an animation and select a compatible scene actor before playback."));
+        return FReply::Handled();
+    }
+
+    const USkeletalMesh* skeletalMesh = skeletalMeshComponent->GetSkeletalMeshAsset();
+    if (skeletalMesh == nullptr ||
+        animation->GetSkeleton() == nullptr ||
+        !animation->GetSkeleton()->IsCompatibleForEditor(skeletalMesh->GetSkeleton()))
+    {
+        statusText->SetText(LOCTEXT(
+            "IncompatibleTimelineActor",
+            "The selected actor's skeletal mesh is not compatible with the loaded animation."));
+        return FReply::Handled();
+    }
+
+    if (currentPreviewTimeSeconds >= animation->GetPlayLength())
+    {
+        currentPreviewTimeSeconds = 0.0f;
+    }
+
+    skeletalMeshComponent->SetUpdateAnimationInEditor(true);
+    skeletalMeshComponent->PlayAnimation(animation, false);
+    skeletalMeshComponent->SetPosition(currentPreviewTimeSeconds, false);
+    skeletalMeshComponent->SetPlayRate(previewPlayRate);
+    isPreviewingSegment = false;
+    isPlayingTimeline = true;
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onPauseClicked()
+{
+    if (USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get())
+    {
+        currentPreviewTimeSeconds = skeletalMeshComponent->GetPosition();
+        skeletalMeshComponent->Stop();
+    }
+    isPreviewingSegment = false;
+    isPlayingTimeline = false;
+    return FReply::Handled();
+}
+
 FReply SHandposeTimelineWidget::onSegmentClicked(const int32 segmentIndex)
 {
-    if (segments.IsValidIndex(segmentIndex))
-    {
-        selectedSegmentIndex = segmentIndex;
-        const FHandposeTimelineSegment& segment = segments[segmentIndex];
-        statusText->SetText(FText::Format(
-            LOCTEXT("SelectedSegment", "Segment {0}: frames {1}-{2}, {3} seconds"),
-            FText::AsNumber(segmentIndex + 1),
-            FText::AsNumber(segment.startFrame),
-            FText::AsNumber(segment.endFrame),
-            FText::AsNumber(segment.durationSeconds)));
-        rebuildTimeline();
-        previewSegment(segment);
-    }
+    selectSegment(segmentIndex, true);
     return FReply::Handled();
+}
+
+void SHandposeTimelineWidget::onPlayheadScrubbed(const float sliderValue)
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || segments.IsEmpty())
+    {
+        return;
+    }
+
+    const FFrameRate frameRate = animation->GetSamplingFrameRate();
+    if (!frameRate.IsValid())
+    {
+        return;
+    }
+
+    const float targetOffset = FMath::Clamp(sliderValue, 0.0f, 1.0f) *
+        getTotalTimelineWidth();
+    float segmentOffset = 0.0f;
+    currentPreviewTimeSeconds = animation->GetPlayLength();
+    for (const FHandposeTimelineSegment& segment : segments)
+    {
+        const float segmentWidth = getSegmentWidth(segment);
+        if (targetOffset <= segmentOffset + segmentWidth + 2.0f)
+        {
+            const float alpha = FMath::Clamp(
+                (targetOffset - segmentOffset - 1.0f) / segmentWidth,
+                0.0f,
+                1.0f);
+            const float startTime = static_cast<float>(
+                frameRate.AsSeconds(segment.startFrame));
+            const float endTime = static_cast<float>(
+                frameRate.AsSeconds(segment.endFrame + 1));
+            currentPreviewTimeSeconds = FMath::Lerp(startTime, endTime, alpha);
+            break;
+        }
+        segmentOffset += segmentWidth + 2.0f;
+    }
+
+    if (USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get())
+    {
+        const USkeletalMesh* skeletalMesh = skeletalMeshComponent->GetSkeletalMeshAsset();
+        if (skeletalMesh != nullptr &&
+            animation->GetSkeleton() != nullptr &&
+            animation->GetSkeleton()->IsCompatibleForEditor(skeletalMesh->GetSkeleton()))
+        {
+            skeletalMeshComponent->SetUpdateAnimationInEditor(true);
+            skeletalMeshComponent->PlayAnimation(animation, false);
+            skeletalMeshComponent->Stop();
+            skeletalMeshComponent->SetPosition(currentPreviewTimeSeconds, false);
+            skeletalMeshComponent->TickAnimation(0.0f, false);
+            skeletalMeshComponent->RefreshBoneTransforms(nullptr);
+            skeletalMeshComponent->UpdateBounds();
+            skeletalMeshComponent->MarkRenderDynamicDataDirty();
+        }
+    }
+
+    isPreviewingSegment = false;
+    isPlayingTimeline = false;
 }
 
 void SHandposeTimelineWidget::onZoomChanged(const float sliderValue)
@@ -328,6 +488,10 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     segments.Reset();
     selectedSegmentIndex = INDEX_NONE;
     isPreviewingSegment = false;
+    isPlayingTimeline = false;
+    previewStartTimeSeconds = 0.0f;
+    previewEndTimeSeconds = 0.0f;
+    currentPreviewTimeSeconds = 0.0f;
 
     if (animation == nullptr)
     {
@@ -380,6 +544,31 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     rebuildTimeline();
 }
 
+void SHandposeTimelineWidget::selectSegment(
+    const int32 segmentIndex,
+    const bool shouldPreview)
+{
+    if (!segments.IsValidIndex(segmentIndex))
+    {
+        return;
+    }
+
+    selectedSegmentIndex = segmentIndex;
+    const FHandposeTimelineSegment& segment = segments[segmentIndex];
+    statusText->SetText(FText::Format(
+        LOCTEXT("SelectedSegment", "Segment {0}: frames {1}-{2}, {3} seconds"),
+        FText::AsNumber(segmentIndex + 1),
+        FText::AsNumber(segment.startFrame),
+        FText::AsNumber(segment.endFrame),
+        FText::AsNumber(segment.durationSeconds)));
+    rebuildTimeline();
+
+    if (shouldPreview)
+    {
+        previewSegment(segment);
+    }
+}
+
 void SHandposeTimelineWidget::previewSegment(
     const FHandposeTimelineSegment& segment)
 {
@@ -387,6 +576,9 @@ void SHandposeTimelineWidget::previewSegment(
     USkeletalMeshComponent* skeletalMeshComponent = previewSkeletalMeshComponent.Get();
     if (animation == nullptr || skeletalMeshComponent == nullptr)
     {
+        statusText->SetText(LOCTEXT(
+            "PreviewRequiresActor",
+            "Select a compatible scene actor with Use Selected Actor to preview this segment."));
         return;
     }
 
@@ -420,7 +612,9 @@ void SHandposeTimelineWidget::previewSegment(
     skeletalMeshComponent->PlayAnimation(animation, false);
     skeletalMeshComponent->SetPosition(previewStartTimeSeconds, false);
     skeletalMeshComponent->SetPlayRate(previewPlayRate);
+    currentPreviewTimeSeconds = previewStartTimeSeconds;
     isPreviewingSegment = true;
+    isPlayingTimeline = false;
 }
 
 void SHandposeTimelineWidget::rebuildTimeline()
@@ -495,9 +689,7 @@ TSharedRef<SWidget> SHandposeTimelineWidget::createSegmentWidget(
     const FHandposeTimelineSegment& segment,
     const int32 segmentIndex)
 {
-    const float segmentWidth = FMath::Max(
-        minimumSegmentWidth,
-        static_cast<float>(segment.durationSeconds) * pixelsPerSecond * timelineZoom);
+    const float segmentWidth = getSegmentWidth(segment);
     const bool isSelected = selectedSegmentIndex == segmentIndex;
 
     return SNew(SBox)
@@ -561,6 +753,95 @@ TSharedRef<SWidget> SHandposeTimelineWidget::createSegmentWidget(
                 ]
             ]
         ];
+}
+
+float SHandposeTimelineWidget::getSegmentWidth(
+    const FHandposeTimelineSegment& segment) const
+{
+    return FMath::Max(
+        minimumSegmentWidth,
+        static_cast<float>(segment.durationSeconds) * pixelsPerSecond * timelineZoom);
+}
+
+float SHandposeTimelineWidget::getPlayheadOffset() const
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || segments.IsEmpty())
+    {
+        return 0.0f;
+    }
+
+    const FFrameRate frameRate = animation->GetSamplingFrameRate();
+    if (!frameRate.IsValid())
+    {
+        return 0.0f;
+    }
+
+    float offset = 0.0f;
+    for (const FHandposeTimelineSegment& segment : segments)
+    {
+        const float segmentWidth = getSegmentWidth(segment);
+        const float startTime = static_cast<float>(frameRate.AsSeconds(segment.startFrame));
+        const float endTime = static_cast<float>(frameRate.AsSeconds(segment.endFrame + 1));
+        if (currentPreviewTimeSeconds <= endTime)
+        {
+            const float duration = FMath::Max(endTime - startTime, UE_SMALL_NUMBER);
+            const float alpha = FMath::Clamp(
+                (currentPreviewTimeSeconds - startTime) / duration,
+                0.0f,
+                1.0f);
+            return offset + 1.0f + alpha * segmentWidth;
+        }
+        offset += segmentWidth + 2.0f;
+    }
+    return offset;
+}
+
+float SHandposeTimelineWidget::getPlayheadSliderValue() const
+{
+    const float timelineWidth = getTotalTimelineWidth();
+    return timelineWidth > 0.0f
+        ? FMath::Clamp(getPlayheadOffset() / timelineWidth, 0.0f, 1.0f)
+        : 0.0f;
+}
+
+float SHandposeTimelineWidget::getTotalTimelineWidth() const
+{
+    float width = 0.0f;
+    for (const FHandposeTimelineSegment& segment : segments)
+    {
+        width += getSegmentWidth(segment) + 2.0f;
+    }
+    return width;
+}
+
+FText SHandposeTimelineWidget::getTimecodeText() const
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || !animation->GetSamplingFrameRate().IsValid())
+    {
+        return FText::FromString(TEXT("00:00:00:00"));
+    }
+
+    const int32 framesPerSecond = FMath::Max(
+        1,
+        FMath::RoundToInt(animation->GetSamplingFrameRate().AsDecimal()));
+    int32 remainingFrames = FMath::Max(
+        0,
+        FMath::FloorToInt(currentPreviewTimeSeconds * framesPerSecond));
+    const int32 frames = remainingFrames % framesPerSecond;
+    remainingFrames /= framesPerSecond;
+    const int32 seconds = remainingFrames % 60;
+    remainingFrames /= 60;
+    const int32 minutes = remainingFrames % 60;
+    const int32 hours = remainingFrames / 60;
+
+    return FText::FromString(FString::Printf(
+        TEXT("%02d:%02d:%02d:%02d"),
+        hours,
+        minutes,
+        seconds,
+        frames));
 }
 
 #undef LOCTEXT_NAMESPACE

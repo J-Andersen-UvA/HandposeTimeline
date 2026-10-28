@@ -28,11 +28,20 @@ private:
     FReply onUseSelectedActorClicked();
     FReply onLoopClicked();
     FReply onSpeedClicked();
+    FReply onPlayClicked();
+    FReply onPauseClicked();
     FReply onSegmentClicked(int32 segmentIndex);
+    void onPlayheadScrubbed(float sliderValue);
     void onZoomChanged(float sliderValue);
     void loadAnimation(UAnimSequenceBase* animation);
     void previewSegment(const FHandposeTimelineSegment& segment);
+    void selectSegment(int32 segmentIndex, bool shouldPreview);
     void rebuildTimeline();
+    float getSegmentWidth(const FHandposeTimelineSegment& segment) const;
+    float getPlayheadOffset() const;
+    float getPlayheadSliderValue() const;
+    float getTotalTimelineWidth() const;
+    FText getTimecodeText() const;
     TArray<FName> getSegmentationBoneNames(const UAnimSequenceBase& animation) const;
     TSharedRef<SWidget> createSegmentWidget(
         const FHandposeTimelineSegment& segment,
@@ -46,8 +55,10 @@ private:
     float timelineZoom = 1.0f;
     float previewStartTimeSeconds = 0.0f;
     float previewEndTimeSeconds = 0.0f;
+    float currentPreviewTimeSeconds = 0.0f;
     float previewPlayRate = 1.0f;
     bool isPreviewingSegment = false;
+    bool isPlayingTimeline = false;
     bool shouldLoopSegmentPreview = false;
     TSharedPtr<SHorizontalBox> segmentContainer;
     TSharedPtr<STextBlock> animationNameText;

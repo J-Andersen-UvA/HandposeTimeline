@@ -2,6 +2,7 @@
 
 #include "Timeline/HandposeTimelineLayout.h"
 #include "Widgets/SHandposeAssignmentLane.h"
+#include "Widgets/SHandposeTimelineRuler.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SHorizontalBox;
@@ -37,9 +38,8 @@ public:
 
 private:
     FReply onSegmentClicked(int32 segmentIndex);
-    void onPlayheadScrubbed(float sliderValue);
+    void onPlayheadScrubbed(float timeSeconds);
     void rebuild();
-    float getPlayheadSliderValue() const;
     TSharedRef<SWidget> createSegmentWidget(
         const FHandposeTimelineSegment& segment,
         int32 segmentIndex);
@@ -54,4 +54,6 @@ private:
     int32 selectedSegmentIndex = INDEX_NONE;
     TSharedPtr<SHorizontalBox> blockContainer;
     TSharedPtr<SHandposeAssignmentLane> assignmentLane;
+    TSharedPtr<SHandposeTimelineRuler> frameRuler;
+    TSharedPtr<SHandposeTimelinePlayheadOverlay> playheadOverlay;
 };

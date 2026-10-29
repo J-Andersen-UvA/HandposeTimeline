@@ -2,11 +2,11 @@
 
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineTrack"
@@ -55,39 +55,43 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
             .Orientation(Orient_Horizontal)
             + SScrollBox::Slot()
             [
-                SNew(SVerticalBox)
-                + SVerticalBox::Slot()
-                .AutoHeight()
+                SNew(SOverlay)
+                + SOverlay::Slot()
                 [
-                    SNew(SBox)
-                    .HeightOverride(20.0f)
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
                     [
-                        SNew(SSlider)
-                        .Value(this, &SHandposeTimelineTrack::getPlayheadSliderValue)
-                        .ToolTipText(LOCTEXT("PlayheadTooltip", "Drag to scrub the animation."))
-                        .OnValueChanged(this, &SHandposeTimelineTrack::onPlayheadScrubbed)
+                        SAssignNew(frameRuler, SHandposeTimelineRuler)
+                        .CurrentTimeSeconds(currentTimeSeconds)
+                        .OnScrubbed(this, &SHandposeTimelineTrack::onPlayheadScrubbed)
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SAssignNew(blockContainer, SHorizontalBox)
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(1.0f, 8.0f, 0.0f, 4.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("AssignedHandshapes", "Assigned Handshapes"))
+                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                        .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SAssignNew(assignmentLane, SHandposeAssignmentLane)
+                        .OnAssignmentSelected(onAssignmentSelected)
+                        .OnAssignmentChanged(onAssignmentChanged)
                     ]
                 ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
+                + SOverlay::Slot()
                 [
-                    SAssignNew(blockContainer, SHorizontalBox)
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                .Padding(1.0f, 8.0f, 0.0f, 4.0f)
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("AssignedHandshapes", "Assigned Handshapes"))
-                    .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                ]
-                + SVerticalBox::Slot()
-                .AutoHeight()
-                [
-                    SAssignNew(assignmentLane, SHandposeAssignmentLane)
-                    .OnAssignmentSelected(onAssignmentSelected)
-                    .OnAssignmentChanged(onAssignmentChanged)
+                    SAssignNew(playheadOverlay, SHandposeTimelinePlayheadOverlay)
+                    .CurrentTimeSeconds(currentTimeSeconds)
                 ]
             ]
         ]
@@ -108,6 +112,14 @@ void SHandposeTimelineTrack::setTimeline(
 {
     selectedSegmentIndex = newSelectedSegmentIndex;
     layout.setTimeline(animation, segments, zoom);
+    if (frameRuler.IsValid())
+    {
+        frameRuler->setTimeline(animation, segments, zoom);
+    }
+    if (playheadOverlay.IsValid())
+    {
+        playheadOverlay->setTimeline(animation, segments, zoom);
+    }
     if (assignmentLane.IsValid())
     {
         assignmentLane->setTimeline(
@@ -126,9 +138,9 @@ FReply SHandposeTimelineTrack::onSegmentClicked(const int32 segmentIndex)
     return FReply::Handled();
 }
 
-void SHandposeTimelineTrack::onPlayheadScrubbed(const float sliderValue)
+void SHandposeTimelineTrack::onPlayheadScrubbed(const float timeSeconds)
 {
-    onScrubbed.ExecuteIfBound(layout.getTimeAtSliderValue(sliderValue));
+    onScrubbed.ExecuteIfBound(timeSeconds);
 }
 
 void SHandposeTimelineTrack::rebuild()
@@ -165,11 +177,6 @@ void SHandposeTimelineTrack::rebuild()
                     block.segmentIndex)
         ];
     }
-}
-
-float SHandposeTimelineTrack::getPlayheadSliderValue() const
-{
-    return layout.getSliderValue(currentTimeSeconds.Get(0.0f));
 }
 
 TSharedRef<SWidget> SHandposeTimelineTrack::createSegmentWidget(

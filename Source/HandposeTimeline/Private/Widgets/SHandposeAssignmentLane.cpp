@@ -269,38 +269,72 @@ SHandposeAssignmentLane::FHitResult SHandposeAssignmentLane::hitTest(
     {
         return {};
     }
+    FHitResult closestEdge;
+    float closestEdgeDistance = edgeHitWidth + 1.0f;
+    for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
+    {
+        const FHandposeAssignment& assignment = assignments[assignmentIndex];
+        const float left = getFrameOffset(assignment.blendStartFrame);
+        const float right = getFrameOffset(assignment.blendEndFrame, true);
+        for (const TPair<float, EDragTarget>& edge : {
+                 TPair<float, EDragTarget>(left, EDragTarget::BlendStart),
+                 TPair<float, EDragTarget>(right, EDragTarget::BlendEnd)})
+        {
+            const float distance = FMath::Abs(localX - edge.Key);
+            const bool winsTie = FMath::IsNearlyEqual(distance, closestEdgeDistance) &&
+                assignmentIndex == selectedAssignmentIndex;
+            if (distance <= edgeHitWidth &&
+                (distance < closestEdgeDistance || winsTie))
+            {
+                closestEdge = {assignmentIndex, edge.Value};
+                closestEdgeDistance = distance;
+            }
+        }
+    }
+    if (closestEdge.assignmentIndex != INDEX_NONE)
+    {
+        return closestEdge;
+    }
+
+    if (localY <= 18.0f)
+    {
+        FHitResult closestHandle;
+        float closestHandleDistance = handleRadius + 1.0f;
+        for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
+        {
+            const FHandposeAssignment& assignment = assignments[assignmentIndex];
+            for (const TPair<float, EDragTarget>& handle : {
+                     TPair<float, EDragTarget>(
+                         getFrameOffset(assignment.fullPoseStartFrame),
+                         EDragTarget::FullPoseStart),
+                     TPair<float, EDragTarget>(
+                         getFrameOffset(assignment.fullPoseEndFrame, true),
+                         EDragTarget::FullPoseEnd)})
+            {
+                const float distance = FMath::Abs(localX - handle.Key);
+                const bool winsTie = FMath::IsNearlyEqual(
+                    distance,
+                    closestHandleDistance) &&
+                    assignmentIndex == selectedAssignmentIndex;
+                if (distance <= handleRadius &&
+                    (distance < closestHandleDistance || winsTie))
+                {
+                    closestHandle = {assignmentIndex, handle.Value};
+                    closestHandleDistance = distance;
+                }
+            }
+        }
+        if (closestHandle.assignmentIndex != INDEX_NONE)
+        {
+            return closestHandle;
+        }
+    }
+
     for (int32 assignmentIndex = assignments.Num() - 1; assignmentIndex >= 0; --assignmentIndex)
     {
         const FHandposeAssignment& assignment = assignments[assignmentIndex];
         const float left = getFrameOffset(assignment.blendStartFrame);
         const float right = getFrameOffset(assignment.blendEndFrame, true);
-        if (localX < left - edgeHitWidth || localX > right + edgeHitWidth)
-        {
-            continue;
-        }
-        if (FMath::Abs(localX - left) <= edgeHitWidth)
-        {
-            return {assignmentIndex, EDragTarget::BlendStart};
-        }
-        if (FMath::Abs(localX - right) <= edgeHitWidth)
-        {
-            return {assignmentIndex, EDragTarget::BlendEnd};
-        }
-        if (localY <= 18.0f)
-        {
-            if (FMath::Abs(
-                    localX - getFrameOffset(assignment.fullPoseStartFrame)) <=
-                handleRadius)
-            {
-                return {assignmentIndex, EDragTarget::FullPoseStart};
-            }
-            if (FMath::Abs(
-                    localX - getFrameOffset(assignment.fullPoseEndFrame, true)) <=
-                handleRadius)
-            {
-                return {assignmentIndex, EDragTarget::FullPoseEnd};
-            }
-        }
         if (localX >= left && localX <= right)
         {
             return {assignmentIndex, EDragTarget::Move};

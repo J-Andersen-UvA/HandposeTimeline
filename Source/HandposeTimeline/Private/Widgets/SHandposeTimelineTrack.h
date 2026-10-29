@@ -37,6 +37,9 @@ private:
         const FHandposeTimelineSegment& segment,
         int32 segmentIndex);
     TSharedRef<SWidget> createGapWidget(const FHandposeTimelineBlock& block) const;
+    TSharedRef<SWidget> createAssignmentWidget(
+        const FHandposeTimelineBlock& block,
+        const FHandposeTimelineSegment* segment);
 
     FHandposeTimelineLayout layout;
     TAttribute<float> currentTimeSeconds;
@@ -44,4 +47,5 @@ private:
     FOnHandposeTimelineScrubbed onScrubbed;
     int32 selectedSegmentIndex = INDEX_NONE;
     TSharedPtr<SHorizontalBox> blockContainer;
+    TSharedPtr<SHorizontalBox> assignmentContainer;
 };

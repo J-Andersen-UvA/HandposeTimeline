@@ -11,16 +11,21 @@
 #include "GameFramework/Actor.h"
 #include "HandshapeSegmentationBlueprintLibrary.h"
 #include "HandshapeSegmentationTypes.h"
+#include "HandshapeMatchingBlueprintLibrary.h"
+#include "HandshapeMatchingTypes.h"
 #include "HandposeTimelineConfig.h"
 #include "IContentBrowserSingleton.h"
 #include "InputCoreTypes.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SHandshapePickerWidget.h"
 #include "Widgets/SHandposeTimelineTrack.h"
+#include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineWidget"
@@ -105,16 +110,35 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .Padding(0.0f, 0.0f, 8.0f, 0.0f)
             [
                 SNew(SButton)
-                .Text(LOCTEXT("LoopSegment", "Loop"))
-                .ToolTipText(LOCTEXT("LoopSegmentTooltip", "Loop the selected segment preview."))
+                .Text(LOCTEXT("LoopAll", "Loop All"))
+                .ToolTipText(LOCTEXT("LoopAllTooltip", "Loop the full timeline when using Play."))
                 .ButtonColorAndOpacity_Lambda(
                     [this]()
                     {
-                        return playbackController->shouldLoop()
+                        return playbackController->shouldLoopAll()
                             ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
                             : FLinearColor::White;
                     })
-                .OnClicked(this, &SHandposeTimelineWidget::onLoopClicked)
+                .OnClicked(this, &SHandposeTimelineWidget::onLoopAllClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("LoopSegment", "Loop Segment"))
+                .ToolTipText(LOCTEXT(
+                    "LoopSegmentTooltip",
+                    "Loop the selected segment when using Play or previewing a segment."))
+                .ButtonColorAndOpacity_Lambda(
+                    [this]()
+                    {
+                        return playbackController->shouldLoopSegment()
+                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                            : FLinearColor::White;
+                    })
+                .OnClicked(this, &SHandposeTimelineWidget::onLoopSegmentClicked)
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -254,6 +278,7 @@ FReply SHandposeTimelineWidget::onLoadConfigClicked()
 {
     FOpenAssetDialogConfig dialogConfig;
     dialogConfig.DialogTitleOverride = LOCTEXT("SelectConfig", "Select Handpose Timeline Config");
+    dialogConfig.DefaultPath = TEXT("/HandposeTimeline/HandposeTimeline/Configs");
     dialogConfig.AssetClassNames.Add(UHandposeTimelineConfig::StaticClass()->GetClassPathName());
     dialogConfig.bAllowMultipleSelection = false;
 
@@ -299,9 +324,15 @@ FReply SHandposeTimelineWidget::onUseSelectedActorClicked()
     return FReply::Handled();
 }
 
-FReply SHandposeTimelineWidget::onLoopClicked()
+FReply SHandposeTimelineWidget::onLoopAllClicked()
 {
-    playbackController->toggleLoop();
+    playbackController->toggleLoopAll();
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onLoopSegmentClicked()
+{
+    playbackController->toggleLoopSegment();
     return FReply::Handled();
 }
 
@@ -325,7 +356,19 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
         return FReply::Handled();
     }
 
-    const EHandposeTimelinePlaybackResult result = playbackController->playTimeline();
+    if (playbackController->shouldLoopSegment() &&
+        !segments.IsValidIndex(selectedSegmentIndex))
+    {
+        statusText->SetText(LOCTEXT(
+            "LoopSegmentRequiresSelection",
+            "Select a segment before using Loop Segment playback."));
+        return FReply::Handled();
+    }
+
+    const EHandposeTimelinePlaybackResult result =
+        playbackController->shouldLoopSegment()
+            ? playbackController->previewSegment(segments[selectedSegmentIndex])
+            : playbackController->playTimeline();
     if (result == EHandposeTimelinePlaybackResult::MissingAnimationOrActor)
     {
         statusText->SetText(LOCTEXT(
@@ -344,6 +387,27 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
 void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)
 {
     selectSegment(segmentIndex, true);
+    openHandshapePicker(segmentIndex);
+}
+
+void SHandposeTimelineWidget::onHandshapeChosen(
+    const int32 segmentIndex,
+    const FName handshapeId)
+{
+    if (!segments.IsValidIndex(segmentIndex))
+    {
+        return;
+    }
+
+    segments[segmentIndex].selectedHandshapeId = handshapeId;
+    selectedSegmentIndex = segmentIndex;
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "HandshapeAssigned",
+            "Assigned {0} to Segment {1}."),
+        FText::FromName(handshapeId),
+        FText::AsNumber(segmentIndex + 1)));
+    refreshTimeline();
 }
 
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)
@@ -511,6 +575,105 @@ void SHandposeTimelineWidget::selectSegment(
             "InvalidPreviewFrameRate",
             "The loaded animation has an invalid sampling frame rate."));
     }
+}
+
+void SHandposeTimelineWidget::openHandshapePicker(const int32 segmentIndex)
+{
+    if (!segments.IsValidIndex(segmentIndex))
+    {
+        return;
+    }
+
+    if (const TSharedPtr<SWindow> existingWindow = handshapePickerWindow.Pin())
+    {
+        existingWindow->RequestDestroyWindow();
+    }
+
+    FString errorMessage;
+    TArray<FHandshapeCandidate> candidates = getCandidatesForSegment(
+        segments[segmentIndex],
+        errorMessage);
+
+    const TSharedRef<SWindow> pickerWindow = SNew(SWindow)
+        .Title(FText::Format(
+            LOCTEXT("HandshapePickerTitle", "Handshape Picker · Segment {0}"),
+            FText::AsNumber(segmentIndex + 1)))
+        .ClientSize(FVector2D(920.0f, 680.0f))
+        .IsTopmostWindow(true)
+        .SupportsMaximize(true)
+        .SupportsMinimize(false);
+
+    const TSharedRef<SHandshapePickerWidget> pickerWidget =
+        SNew(SHandshapePickerWidget)
+        .SegmentIndex(segmentIndex)
+        .Segment(segments[segmentIndex])
+        .Candidates(MoveTemp(candidates))
+        .EmptyMessage(errorMessage)
+        .OnHandshapeChosen(this, &SHandposeTimelineWidget::onHandshapeChosen);
+    pickerWidget->setOwnerWindow(pickerWindow);
+    pickerWindow->SetContent(pickerWidget);
+    FSlateApplication::Get().AddWindow(pickerWindow);
+    handshapePickerWindow = pickerWindow;
+}
+
+TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
+    const FHandposeTimelineSegment& segment,
+    FString& errorMessage) const
+{
+    TArray<FHandshapeCandidate> candidates;
+    const UHandposeTimelineConfig* config = loadedConfig.Get();
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (config == nullptr)
+    {
+        errorMessage = TEXT("Load a Handpose Timeline config to rank handshapes.");
+        return candidates;
+    }
+    if (animation == nullptr)
+    {
+        errorMessage = TEXT("Load an animation before choosing a handshape.");
+        return candidates;
+    }
+
+    TArray<UAnimSequenceBase*> handshapeAnimations;
+    for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
+    {
+        if (UAnimSequence* handshapeAnimation = handshapeReference.LoadSynchronous())
+        {
+            handshapeAnimations.Add(handshapeAnimation);
+        }
+    }
+    if (handshapeAnimations.IsEmpty())
+    {
+        errorMessage = TEXT("The loaded config does not resolve any handshape animations.");
+        return candidates;
+    }
+
+    const FHandshapeMatchingResult matchingResult =
+        UHandshapeMatchingBlueprintLibrary::matchSegmentToHandshapes(
+            animation,
+            segment.startFrame,
+            segment.endFrame,
+            handshapeAnimations,
+            FAnimPoseEvaluationOptions(),
+            config->getSegmentationSettings(),
+            config->matchingMethod);
+    if (!matchingResult.success)
+    {
+        errorMessage = matchingResult.errorMessage;
+        return candidates;
+    }
+
+    candidates.Reserve(matchingResult.matches.Num());
+    for (const FHandshapeMatch& match : matchingResult.matches)
+    {
+        FHandshapeCandidate& candidate = candidates.AddDefaulted_GetRef();
+        candidate.handshapeId = match.handshapeId;
+        candidate.displayName = FText::FromName(match.handshapeId);
+        candidate.handshapeAnimation = match.handshapeAnimation;
+        candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
+    }
+    FHandshapeCandidate::sortByRelevance(candidates);
+    return candidates;
 }
 
 void SHandposeTimelineWidget::refreshTimeline()

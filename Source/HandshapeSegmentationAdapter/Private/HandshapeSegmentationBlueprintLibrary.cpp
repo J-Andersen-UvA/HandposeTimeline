@@ -3,23 +3,10 @@
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
-#include "HandshapeSegmentationMath.h"
+#include "HandshapeSegmentationBridge.h"
 
-#include <Eigen/Geometry>
 #include <utility>
 #include <vector>
-
-namespace
-{
-Eigen::Quaterniond toEigenQuaternion(const FQuat& quaternion)
-{
-    return Eigen::Quaterniond(
-        quaternion.W,
-        quaternion.X,
-        quaternion.Y,
-        quaternion.Z);
-}
-}
 
 FHandshapeSegmentationResult
 UHandshapeSegmentationBlueprintLibrary::segmentAnimation(
@@ -129,39 +116,43 @@ UHandshapeSegmentationBlueprintLibrary::segmentAnimation(
         }
     }
 
-    std::vector<std::vector<Eigen::Quaterniond>> quaternionTracks;
+    std::vector<std::vector<handshapeSegmentationBridge::Quaternion>> quaternionTracks;
     quaternionTracks.reserve(result.quaternionTracks.Num());
     for (const FHandshapeQuaternionTrack& unrealTrack : result.quaternionTracks)
     {
-        std::vector<Eigen::Quaterniond> track;
+        std::vector<handshapeSegmentationBridge::Quaternion> track;
         track.reserve(unrealTrack.localRotations.Num());
         for (const FQuat& quaternion : unrealTrack.localRotations)
         {
-            track.push_back(toEigenQuaternion(quaternion));
+            track.push_back({
+                quaternion.W,
+                quaternion.X,
+                quaternion.Y,
+                quaternion.Z
+            });
         }
-        handshapeSegmentation::alignQuaternionSigns(track);
-        handshapeSegmentation::smoothQuaternions(
+        handshapeSegmentationBridge::prepareQuaternionTrack(
             track,
             FMath::Max(settings.quaternionSmoothingSigma, 0.01));
         quaternionTracks.push_back(std::move(track));
     }
 
     std::vector<double> acceleration =
-        handshapeSegmentation::aggregateQuaternionAcceleration(
+        handshapeSegmentationBridge::aggregateQuaternionAcceleration(
             quaternionTracks,
             1.0 / frameRate.AsDecimal());
-    handshapeSegmentation::smoothValues(
+    handshapeSegmentationBridge::smoothValues(
         acceleration,
         FMath::Max(settings.accelerationSmoothingSigma, 0.01));
-    const std::vector<handshapeSegmentation::Segment> segments =
-        handshapeSegmentation::segmentByAcceleration(
+    const std::vector<handshapeSegmentationBridge::Segment> segments =
+        handshapeSegmentationBridge::segmentByAcceleration(
             acceleration,
             settings.thresholdFactor,
             FMath::Max(settings.minimumSegmentLength, 1),
             settings.minimumAccelerationThreshold);
 
     result.segments.Reserve(static_cast<int32>(segments.size()));
-    for (const handshapeSegmentation::Segment& sourceSegment : segments)
+    for (const handshapeSegmentationBridge::Segment& sourceSegment : segments)
     {
         FHandshapeSegment& segment = result.segments.AddDefaulted_GetRef();
         segment.startFrame = sourceSegment.start;

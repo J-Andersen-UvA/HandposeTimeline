@@ -27,6 +27,13 @@ DerivedDataCache/
 *.exe
 *.app
 
+# Third-party dependency builds
+ThirdParty/HandshapeSegmentation/build/
+ThirdParty/HandshapeSegmentation/lib/
+ThirdParty/HandshapeSegmentation/vcpkg_installed/
+ThirdParty/HandshapeSegmentation/packages/
+ThirdParty/HandshapeSegmentation/downloads/
+
 # Logs and temporary files
 *.log
 *.tmp

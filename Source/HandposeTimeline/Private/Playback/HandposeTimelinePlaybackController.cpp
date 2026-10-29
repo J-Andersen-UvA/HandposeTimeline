@@ -40,9 +40,19 @@ void FHandposeTimelinePlaybackController::tick()
         animation.IsValid() &&
         currentTimeSeconds >= animation->GetPlayLength())
     {
-        previewComponent->Stop();
-        currentTimeSeconds = animation->GetPlayLength();
-        isPlayingTimeline = false;
+        if (loopAll)
+        {
+            previewComponent->SetPosition(0.0f, false);
+            previewComponent->SetPlayRate(playRate);
+            previewComponent->Play(false);
+            currentTimeSeconds = 0.0f;
+        }
+        else
+        {
+            previewComponent->Stop();
+            currentTimeSeconds = animation->GetPlayLength();
+            isPlayingTimeline = false;
+        }
     }
 }
 
@@ -175,9 +185,22 @@ void FHandposeTimelinePlaybackController::pause()
     isPlayingTimeline = false;
 }
 
-void FHandposeTimelinePlaybackController::toggleLoop()
+void FHandposeTimelinePlaybackController::toggleLoopAll()
+{
+    loopAll = !loopAll;
+    if (loopAll)
+    {
+        loopSegment = false;
+    }
+}
+
+void FHandposeTimelinePlaybackController::toggleLoopSegment()
 {
     loopSegment = !loopSegment;
+    if (loopSegment)
+    {
+        loopAll = false;
+    }
 }
 
 float FHandposeTimelinePlaybackController::cyclePlayRate()
@@ -222,7 +245,12 @@ bool FHandposeTimelinePlaybackController::isPlaying() const
     return isPreviewingSegment || isPlayingTimeline;
 }
 
-bool FHandposeTimelinePlaybackController::shouldLoop() const
+bool FHandposeTimelinePlaybackController::shouldLoopAll() const
+{
+    return loopAll;
+}
+
+bool FHandposeTimelinePlaybackController::shouldLoopSegment() const
 {
     return loopSegment;
 }

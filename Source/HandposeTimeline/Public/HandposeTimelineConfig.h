@@ -2,6 +2,7 @@
 
 #include "Engine/DataAsset.h"
 #include "Engine/EngineTypes.h"
+#include "HandshapeMatchingTypes.h"
 #include "HandshapeSegmentationTypes.h"
 #include "HandposeTimelineConfig.generated.h"
 
@@ -29,9 +30,21 @@ public:
     bool includeHandshapeSubfolders = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
+    EHandshapeMatchingMethod matchingMethod = EHandshapeMatchingMethod::Euclidean;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
     TArray<TSoftObjectPtr<UAnimSequence>> handshapePoses;
+
+    UFUNCTION(
+        CallInEditor,
+        Category = "Handshapes",
+        meta = (DisplayName = "Load Handshapes From Content Folder"))
+    void loadHandshapesFromContentFolder();
 
     FHandshapeSegmentationSettings getSegmentationSettings() const;
     FString getHandshapeContentPath() const;
     TArray<TSoftObjectPtr<UAnimSequence>> getHandshapePoses() const;
+
+private:
+    TArray<TSoftObjectPtr<UAnimSequence>> findHandshapesInContentFolder() const;
 };

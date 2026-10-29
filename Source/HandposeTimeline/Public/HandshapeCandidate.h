@@ -5,6 +5,7 @@
 #include "HandshapeCandidate.generated.h"
 
 class UTexture2D;
+class UAnimSequenceBase;
 
 USTRUCT(BlueprintType)
 struct HANDPOSETIMELINE_API FHandshapeCandidate
@@ -19,6 +20,9 @@ struct HANDPOSETIMELINE_API FHandshapeCandidate
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
     TSoftObjectPtr<UTexture2D> previewTexture;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
+    TSoftObjectPtr<UAnimSequenceBase> handshapeAnimation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     double relevanceScore = 0.0;

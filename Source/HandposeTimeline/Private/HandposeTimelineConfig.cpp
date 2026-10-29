@@ -50,6 +50,25 @@ FString UHandposeTimelineConfig::getHandshapeContentPath() const
 TArray<TSoftObjectPtr<UAnimSequence>> UHandposeTimelineConfig::getHandshapePoses() const
 {
     TArray<TSoftObjectPtr<UAnimSequence>> poses = handshapePoses;
+    for (const TSoftObjectPtr<UAnimSequence>& folderPose : findHandshapesInContentFolder())
+    {
+        poses.AddUnique(folderPose);
+    }
+    return poses;
+}
+
+void UHandposeTimelineConfig::loadHandshapesFromContentFolder()
+{
+    Modify();
+    handshapePoses = findHandshapesInContentFolder();
+    MarkPackageDirty();
+    PostEditChange();
+}
+
+TArray<TSoftObjectPtr<UAnimSequence>>
+UHandposeTimelineConfig::findHandshapesInContentFolder() const
+{
+    TArray<TSoftObjectPtr<UAnimSequence>> poses;
     if (handshapeContentFolder.Path.IsEmpty())
     {
         return poses;
@@ -66,7 +85,14 @@ TArray<TSoftObjectPtr<UAnimSequence>> UHandposeTimelineConfig::getHandshapePoses
     assetRegistryModule.Get().GetAssets(filter, assets);
     for (const FAssetData& asset : assets)
     {
-        poses.AddUnique(TSoftObjectPtr<UAnimSequence>(asset.ToSoftObjectPath()));
+        poses.Add(TSoftObjectPtr<UAnimSequence>(asset.ToSoftObjectPath()));
     }
+    poses.Sort(
+        [](const TSoftObjectPtr<UAnimSequence>& left,
+           const TSoftObjectPtr<UAnimSequence>& right)
+        {
+            return left.ToSoftObjectPath().ToString() <
+                right.ToSoftObjectPath().ToString();
+        });
     return poses;
 }

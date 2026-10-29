@@ -30,6 +30,9 @@ public:
     virtual FReply OnPreviewKeyDown(
         const FGeometry& myGeometry,
         const FKeyEvent& keyEvent) override;
+    virtual FReply OnMouseWheel(
+        const FGeometry& myGeometry,
+        const FPointerEvent& mouseEvent) override;
 
 private:
     FReply onLoadAnimationClicked();
@@ -51,6 +54,7 @@ private:
     void onPlayheadScrubbed(float timeSeconds);
     void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);
+    void onZoomWheel(float wheelDelta);
     void loadAnimation(UAnimSequenceBase* animation);
     void loadConfig(UHandposeTimelineConfig* config);
     void selectSegment(int32 segmentIndex, bool shouldPreview);

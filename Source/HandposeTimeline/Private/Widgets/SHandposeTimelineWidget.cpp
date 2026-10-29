@@ -172,7 +172,12 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 .WidthOverride(140.0f)
                 [
                     SNew(SSlider)
-                    .Value(0.0f)
+                    .Value_Lambda(
+                        [this]()
+                        {
+                            return (timelineZoom - minimumTimelineZoom) /
+                                (maximumTimelineZoom - minimumTimelineZoom);
+                        })
                     .OnValueChanged(this, &SHandposeTimelineWidget::onZoomChanged)
                 ]
             ]
@@ -225,6 +230,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
             .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
             .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+            .OnZoomWheel(this, &SHandposeTimelineWidget::onZoomWheel)
             .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
             .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
         ]
@@ -257,6 +263,18 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
         return FReply::Handled();
     }
     return SCompoundWidget::OnPreviewKeyDown(myGeometry, keyEvent);
+}
+
+FReply SHandposeTimelineWidget::OnMouseWheel(
+    const FGeometry& myGeometry,
+    const FPointerEvent& mouseEvent)
+{
+    if (mouseEvent.IsControlDown())
+    {
+        onZoomWheel(mouseEvent.GetWheelDelta());
+        return FReply::Handled();
+    }
+    return SCompoundWidget::OnMouseWheel(myGeometry, mouseEvent);
 }
 
 FReply SHandposeTimelineWidget::onLoadAnimationClicked()
@@ -514,6 +532,18 @@ void SHandposeTimelineWidget::onZoomChanged(const float sliderValue)
         LOCTEXT("ZoomPercent", "{0}%"),
         FText::AsNumber(FMath::RoundToInt(timelineZoom * 100.0f))));
     refreshTimeline();
+}
+
+void SHandposeTimelineWidget::onZoomWheel(const float wheelDelta)
+{
+    constexpr float zoomStep = 0.05f;
+    const float currentSliderValue =
+        (timelineZoom - minimumTimelineZoom) /
+        (maximumTimelineZoom - minimumTimelineZoom);
+    onZoomChanged(FMath::Clamp(
+        currentSliderValue + wheelDelta * zoomStep,
+        0.0f,
+        1.0f));
 }
 
 void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)

@@ -9,6 +9,7 @@ class UAnimSequenceBase;
 
 DECLARE_DELEGATE_OneParam(FOnHandposeTimelineSegmentSelected, int32)
 DECLARE_DELEGATE_OneParam(FOnHandposeTimelineScrubbed, float)
+DECLARE_DELEGATE_OneParam(FOnHandposeTimelineZoomWheel, float)
 
 class SHandposeTimelineTrack : public SCompoundWidget
 {
@@ -20,6 +21,7 @@ public:
         SLATE_ATTRIBUTE(float, CurrentTimeSeconds)
         SLATE_EVENT(FOnHandposeTimelineSegmentSelected, OnSegmentSelected)
         SLATE_EVENT(FOnHandposeTimelineScrubbed, OnScrubbed)
+        SLATE_EVENT(FOnHandposeTimelineZoomWheel, OnZoomWheel)
         SLATE_EVENT(FOnHandposeAssignmentSelected, OnAssignmentSelected)
         SLATE_EVENT(FOnHandposeAssignmentChanged, OnAssignmentChanged)
     SLATE_END_ARGS()
@@ -46,6 +48,7 @@ private:
     TAttribute<float> currentTimeSeconds;
     FOnHandposeTimelineSegmentSelected onSegmentSelected;
     FOnHandposeTimelineScrubbed onScrubbed;
+    FOnHandposeTimelineZoomWheel onZoomWheel;
     FOnHandposeAssignmentSelected onAssignmentSelected;
     FOnHandposeAssignmentChanged onAssignmentChanged;
     int32 selectedSegmentIndex = INDEX_NONE;

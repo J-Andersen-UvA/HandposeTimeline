@@ -11,21 +11,47 @@
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineTrack"
 
+class SHandposeTimelineScrollBox : public SScrollBox
+{
+public:
+    void setOnZoomWheel(const FOnHandposeTimelineZoomWheel& delegate)
+    {
+        onZoomWheel = delegate;
+    }
+
+    virtual FReply OnMouseWheel(
+        const FGeometry& myGeometry,
+        const FPointerEvent& mouseEvent) override
+    {
+        if (mouseEvent.IsControlDown())
+        {
+            onZoomWheel.ExecuteIfBound(mouseEvent.GetWheelDelta());
+            return FReply::Handled();
+        }
+        return SScrollBox::OnMouseWheel(myGeometry, mouseEvent);
+    }
+
+private:
+    FOnHandposeTimelineZoomWheel onZoomWheel;
+};
+
 void SHandposeTimelineTrack::Construct(const FArguments& arguments)
 {
     currentTimeSeconds = arguments._CurrentTimeSeconds;
     onSegmentSelected = arguments._OnSegmentSelected;
     onScrubbed = arguments._OnScrubbed;
+    onZoomWheel = arguments._OnZoomWheel;
     onAssignmentSelected = arguments._OnAssignmentSelected;
     onAssignmentChanged = arguments._OnAssignmentChanged;
 
+    TSharedPtr<SHandposeTimelineScrollBox> scrollBox;
     ChildSlot
     [
         SNew(SBorder)
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
         .Padding(12.0f)
         [
-            SNew(SScrollBox)
+            SAssignNew(scrollBox, SHandposeTimelineScrollBox)
             .Orientation(Orient_Horizontal)
             + SScrollBox::Slot()
             [
@@ -66,6 +92,8 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
             ]
         ]
     ];
+
+    scrollBox->setOnZoomWheel(onZoomWheel);
 
     rebuild();
 }

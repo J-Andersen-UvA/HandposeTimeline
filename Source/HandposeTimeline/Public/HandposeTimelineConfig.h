@@ -35,6 +35,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
     TArray<TSoftObjectPtr<UAnimSequence>> handshapePoses;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Output",
+        meta = (ContentDir, LongPackageName))
+    FDirectoryPath bakedAnimationOutputFolder;
+
     UFUNCTION(
         CallInEditor,
         Category = "Handshapes",
@@ -44,6 +51,7 @@ public:
     FHandshapeSegmentationSettings getSegmentationSettings() const;
     FString getHandshapeContentPath() const;
     TArray<TSoftObjectPtr<UAnimSequence>> getHandshapePoses() const;
+    FString getBakedAnimationOutputPath() const;
 
 private:
     TArray<TSoftObjectPtr<UAnimSequence>> findHandshapesInContentFolder() const;

@@ -35,6 +35,7 @@ UHandposeTimelineConfig::UHandposeTimelineConfig()
     segmentationSettings.accelerationSmoothingSigma = 1.5;
     segmentationSettings.thresholdFactor = 0.5;
     handshapeContentFolder.Path = TEXT("/HandposeTimeline/HandposeTimeline/Handshapes");
+    bakedAnimationOutputFolder.Path = TEXT("/Game/HandposeTimeline/Baked");
 }
 
 FHandshapeSegmentationSettings UHandposeTimelineConfig::getSegmentationSettings() const
@@ -55,6 +56,11 @@ TArray<TSoftObjectPtr<UAnimSequence>> UHandposeTimelineConfig::getHandshapePoses
         poses.AddUnique(folderPose);
     }
     return poses;
+}
+
+FString UHandposeTimelineConfig::getBakedAnimationOutputPath() const
+{
+    return bakedAnimationOutputFolder.Path;
 }
 
 void UHandposeTimelineConfig::loadHandshapesFromContentFolder()

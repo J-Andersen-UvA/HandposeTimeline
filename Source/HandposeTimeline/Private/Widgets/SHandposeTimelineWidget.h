@@ -42,6 +42,7 @@ private:
     FReply onLoopSegmentClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
+    FReply onBakeClicked();
     void onSegmentSelected(int32 segmentIndex);
     void onHandshapeChosen(
         int32 segmentIndex,

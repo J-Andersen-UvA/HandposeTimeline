@@ -9,6 +9,12 @@
   "CanContainContent": true,
   "IsBetaVersion": true,
   "Installed": false,
+  "Plugins": [
+    {
+      "Name": "EditorScriptingUtilities",
+      "Enabled": true
+    }
+  ],
   "Modules": [
     {
       "Name": "HandshapeSegmentationAdapter",

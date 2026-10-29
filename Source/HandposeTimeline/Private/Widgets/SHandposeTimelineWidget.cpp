@@ -5,6 +5,7 @@
 #include "Animation/Skeleton.h"
 #include "AnimPose.h"
 #include "AssetRegistry/AssetData.h"
+#include "Baking/HandposeBakeService.h"
 #include "ContentBrowserModule.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
@@ -76,6 +77,17 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 .Text(LOCTEXT("LoadAnimation", "Load Animation"))
                 .ToolTipText(LOCTEXT("LoadAnimationTooltip", "Choose an animation and generate its handpose segments."))
                 .OnClicked(this, &SHandposeTimelineWidget::onLoadAnimationClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("Bake", "Bake"))
+                .ToolTipText(LOCTEXT(
+                    "BakeTooltip",
+                    "Bake the current handshape preview to the configured output folder."))
+                .OnClicked(this, &SHandposeTimelineWidget::onBakeClicked)
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -405,6 +417,51 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
     return FReply::Handled();
 }
 
+FReply SHandposeTimelineWidget::onBakeClicked()
+{
+    UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
+    UHandposeTimelineConfig* config = loadedConfig.Get();
+    if (sourceAnimation == nullptr || config == nullptr)
+    {
+        statusText->SetText(LOCTEXT(
+            "BakeRequiresAnimationAndConfig",
+            "Load an animation and config before baking."));
+        return FReply::Handled();
+    }
+    if (assignments.IsEmpty())
+    {
+        statusText->SetText(LOCTEXT(
+            "BakeRequiresAssignments",
+            "Assign at least one handshape before baking."));
+        return FReply::Handled();
+    }
+    if (!previewAnimation.IsValid())
+    {
+        rebuildPreviewAnimation(false);
+    }
+
+    const FHandposeBakeResult result = FHandposeBakeService::bake(
+        previewAnimation.Get(),
+        sourceAnimation,
+        config->getBakedAnimationOutputPath());
+    if (result.cancelled)
+    {
+        statusText->SetText(LOCTEXT("BakeCancelled", "Bake cancelled."));
+    }
+    else if (!result.success)
+    {
+        statusText->SetText(FText::FromString(result.errorMessage));
+    }
+    else
+    {
+        statusText->SetText(FText::Format(
+            LOCTEXT("BakeSucceeded", "Baked {0} to {1}."),
+            FText::FromString(sourceAnimation->GetName()),
+            FText::FromString(result.outputPath)));
+    }
+    return FReply::Handled();
+}
+
 void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)
 {
     selectSegment(segmentIndex, true);
@@ -430,16 +487,28 @@ void SHandposeTimelineWidget::onHandshapeChosen(
     if (selectedAssignmentIndex == INDEX_NONE)
     {
         const FHandposeTimelineSegment& segment = segments[segmentIndex];
-        const int32 blendFrameCount = FMath::Min(
-            6,
-            FMath::Max(0, (segment.getFrameCount() - 1) / 4));
+        const int32 lastFrame = loadedAnimation.IsValid()
+            ? FMath::Max(0, loadedAnimation->GetNumberOfSampledKeys() - 1)
+            : segment.endFrame;
+        const int32 previousSegmentEnd = segmentIndex > 0
+            ? segments[segmentIndex - 1].endFrame
+            : -1;
+        const int32 nextSegmentStart = segments.IsValidIndex(segmentIndex + 1)
+            ? segments[segmentIndex + 1].startFrame
+            : lastFrame + 1;
         FHandposeAssignment& assignment = assignments.AddDefaulted_GetRef();
         assignment.assignmentId = FGuid::NewGuid();
         assignment.sourceSegmentIndex = segmentIndex;
-        assignment.blendStartFrame = segment.startFrame;
-        assignment.fullPoseStartFrame = segment.startFrame + blendFrameCount;
-        assignment.fullPoseEndFrame = segment.endFrame - blendFrameCount;
-        assignment.blendEndFrame = segment.endFrame;
+        assignment.blendStartFrame = FMath::Clamp(
+            previousSegmentEnd + 1,
+            0,
+            segment.startFrame);
+        assignment.fullPoseStartFrame = segment.startFrame;
+        assignment.fullPoseEndFrame = segment.endFrame;
+        assignment.blendEndFrame = FMath::Clamp(
+            nextSegmentStart - 1,
+            segment.endFrame,
+            lastFrame);
         selectedAssignmentIndex = assignments.Num() - 1;
     }
     FHandposeAssignment& assignment = assignments[selectedAssignmentIndex];

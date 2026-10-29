@@ -33,6 +33,15 @@ public:
     virtual FReply OnMouseWheel(
         const FGeometry& myGeometry,
         const FPointerEvent& mouseEvent) override;
+    void loadAnimation(UAnimSequenceBase* animation);
+    bool canBakeCurrentAnimation() const;
+    bool hasAssignments() const { return !assignments.IsEmpty(); }
+    bool bakeCurrentAnimation(
+        UAnimSequence*& outputAnimation,
+        FString& outputPath,
+        FString& errorMessage,
+        bool& cancelled);
+    UAnimSequenceBase* getLoadedAnimation() const;
 
 private:
     FReply onLoadAnimationClicked();
@@ -56,7 +65,6 @@ private:
     void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);
     void onZoomWheel(float wheelDelta);
-    void loadAnimation(UAnimSequenceBase* animation);
     void loadConfig(UHandposeTimelineConfig* config);
     void selectSegment(int32 segmentIndex, bool shouldPreview);
     void openHandshapePicker(int32 segmentIndex);

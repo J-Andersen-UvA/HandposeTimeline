@@ -419,21 +419,62 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
 
 FReply SHandposeTimelineWidget::onBakeClicked()
 {
+    UAnimSequence* outputAnimation = nullptr;
+    FString outputPath;
+    FString errorMessage;
+    bool cancelled = false;
+    const bool success = bakeCurrentAnimation(
+        outputAnimation,
+        outputPath,
+        errorMessage,
+        cancelled);
+    if (cancelled)
+    {
+        statusText->SetText(LOCTEXT("BakeCancelled", "Bake cancelled."));
+    }
+    else if (!success)
+    {
+        statusText->SetText(FText::FromString(errorMessage));
+    }
+    else
+    {
+        statusText->SetText(FText::Format(
+            LOCTEXT("BakeSucceeded", "Baked {0} to {1}."),
+            FText::FromString(outputAnimation->GetName()),
+            FText::FromString(outputPath)));
+    }
+    return FReply::Handled();
+}
+
+bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
+{
+    return Cast<UAnimSequence>(loadedAnimation.Get()) != nullptr &&
+        loadedConfig.IsValid() &&
+        !assignments.IsEmpty();
+}
+
+bool SHandposeTimelineWidget::bakeCurrentAnimation(
+    UAnimSequence*& outputAnimation,
+    FString& outputPath,
+    FString& errorMessage,
+    bool& cancelled)
+{
+    outputAnimation = nullptr;
+    outputPath.Reset();
+    errorMessage.Reset();
+    cancelled = false;
+
     UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
     UHandposeTimelineConfig* config = loadedConfig.Get();
     if (sourceAnimation == nullptr || config == nullptr)
     {
-        statusText->SetText(LOCTEXT(
-            "BakeRequiresAnimationAndConfig",
-            "Load an animation and config before baking."));
-        return FReply::Handled();
+        errorMessage = TEXT("Load an animation and config before baking.");
+        return false;
     }
     if (assignments.IsEmpty())
     {
-        statusText->SetText(LOCTEXT(
-            "BakeRequiresAssignments",
-            "Assign at least one handshape before baking."));
-        return FReply::Handled();
+        errorMessage = TEXT("Assign at least one handshape before baking.");
+        return false;
     }
     if (!previewAnimation.IsValid())
     {
@@ -444,22 +485,16 @@ FReply SHandposeTimelineWidget::onBakeClicked()
         previewAnimation.Get(),
         sourceAnimation,
         config->getBakedAnimationOutputPath());
-    if (result.cancelled)
-    {
-        statusText->SetText(LOCTEXT("BakeCancelled", "Bake cancelled."));
-    }
-    else if (!result.success)
-    {
-        statusText->SetText(FText::FromString(result.errorMessage));
-    }
-    else
-    {
-        statusText->SetText(FText::Format(
-            LOCTEXT("BakeSucceeded", "Baked {0} to {1}."),
-            FText::FromString(sourceAnimation->GetName()),
-            FText::FromString(result.outputPath)));
-    }
-    return FReply::Handled();
+    outputAnimation = result.animation;
+    outputPath = result.outputPath;
+    errorMessage = result.errorMessage;
+    cancelled = result.cancelled;
+    return result.success;
+}
+
+UAnimSequenceBase* SHandposeTimelineWidget::getLoadedAnimation() const
+{
+    return loadedAnimation.Get();
 }
 
 void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)

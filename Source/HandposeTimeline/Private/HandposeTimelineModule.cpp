@@ -28,6 +28,7 @@ void FHandposeTimelineModule::StartupModule()
 
 void FHandposeTimelineModule::ShutdownModule()
 {
+    handposeTimelineWidget.Reset();
     UToolMenus::UnRegisterStartupCallback(this);
     UToolMenus::UnregisterOwner(this);
     FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(handposeTimelineTabName);
@@ -51,13 +52,66 @@ void FHandposeTimelineModule::openHandposeTimeline()
     FGlobalTabmanager::Get()->TryInvokeTab(handposeTimelineTabName);
 }
 
+bool FHandposeTimelineModule::openAnimation(UAnimSequenceBase* animation)
+{
+    if (animation == nullptr)
+    {
+        return false;
+    }
+
+    FGlobalTabmanager::Get()->TryInvokeTab(handposeTimelineTabName);
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    if (!widget.IsValid())
+    {
+        return false;
+    }
+
+    widget->loadAnimation(animation);
+    return true;
+}
+
+bool FHandposeTimelineModule::canBakeCurrentAnimation() const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() && widget->canBakeCurrentAnimation();
+}
+
+bool FHandposeTimelineModule::hasAssignments() const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() && widget->hasAssignments();
+}
+
+bool FHandposeTimelineModule::bakeCurrentAnimation(
+    UAnimSequence*& outputAnimation,
+    FString& outputPath,
+    FString& errorMessage,
+    bool& cancelled)
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() && widget->bakeCurrentAnimation(
+        outputAnimation,
+        outputPath,
+        errorMessage,
+        cancelled);
+}
+
+UAnimSequenceBase* FHandposeTimelineModule::getLoadedAnimation() const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() ? widget->getLoadedAnimation() : nullptr;
+}
+
 TSharedRef<SDockTab> FHandposeTimelineModule::spawnHandposeTimelineTab(
     const FSpawnTabArgs& spawnTabArgs)
 {
+    const TSharedRef<SHandposeTimelineWidget> widget =
+        SNew(SHandposeTimelineWidget);
+    handposeTimelineWidget = widget;
     return SNew(SDockTab)
         .TabRole(ETabRole::NomadTab)
         [
-            SNew(SHandposeTimelineWidget)
+            widget
         ];
 }
 

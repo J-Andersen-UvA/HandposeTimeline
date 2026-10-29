@@ -168,7 +168,6 @@ void SHandposeTimelineTrack::rebuild()
     {
         blockContainer->AddSlot()
         .AutoWidth()
-        .Padding(1.0f, 0.0f)
         [
             block.isGap()
                 ? createGapWidget(block)

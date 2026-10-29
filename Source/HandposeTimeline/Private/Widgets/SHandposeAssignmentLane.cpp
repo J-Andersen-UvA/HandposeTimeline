@@ -62,7 +62,7 @@ int32 SHandposeAssignmentLane::OnPaint(
             layerId,
             allottedGeometry.ToPaintGeometry(
                 FVector2D(blockWidth, clipHeight),
-                FSlateLayoutTransform(FVector2D(blockOffset + 1.0f, 0.0f))),
+                FSlateLayoutTransform(FVector2D(blockOffset, 0.0f))),
             brush,
             drawEffects,
             block.isGap()
@@ -81,13 +81,13 @@ int32 SHandposeAssignmentLane::OnPaint(
                 layerId + 1,
                 allottedGeometry.ToPaintGeometry(
                     FVector2D(blockWidth - 8.0f, 18.0f),
-                    FSlateLayoutTransform(FVector2D(blockOffset + 5.0f, 21.0f))),
+                    FSlateLayoutTransform(FVector2D(blockOffset + 4.0f, 21.0f))),
                 NSLOCTEXT("HandposeAssignmentLane", "Unassigned", "Unassigned"),
                 FAppStyle::GetFontStyle(TEXT("SmallFont")),
                 drawEffects,
                 FLinearColor(0.58f, 0.58f, 0.58f, 1.0f));
         }
-        blockOffset += blockWidth + 2.0f;
+        blockOffset += blockWidth;
     }
 
     for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)

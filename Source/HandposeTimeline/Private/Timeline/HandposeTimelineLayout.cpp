@@ -5,10 +5,7 @@
 namespace
 {
 constexpr float pixelsPerSecond = 180.0f;
-constexpr float minimumSegmentWidth = 72.0f;
-constexpr float minimumGapWidth = 8.0f;
-constexpr float blockSpacing = 2.0f;
-constexpr float blockInset = 1.0f;
+constexpr float minimumBlockWidth = 1.0f;
 }
 
 void FHandposeTimelineLayout::setTimeline(
@@ -34,24 +31,16 @@ const TArray<FHandposeTimelineSegment>& FHandposeTimelineLayout::getSegments() c
 
 float FHandposeTimelineLayout::getBlockWidth(const FHandposeTimelineBlock& block) const
 {
-    if (!block.isGap() && segments.IsValidIndex(block.segmentIndex))
-    {
-        return FMath::Max(
-            minimumSegmentWidth,
-            static_cast<float>(segments[block.segmentIndex].durationSeconds) *
-                pixelsPerSecond * zoom);
-    }
-
     UAnimSequenceBase* loadedAnimation = animation.Get();
     if (loadedAnimation == nullptr || !loadedAnimation->GetSamplingFrameRate().IsValid())
     {
-        return minimumGapWidth;
+        return minimumBlockWidth;
     }
 
     const double durationSeconds = loadedAnimation->GetSamplingFrameRate().AsSeconds(
         block.endFrame - block.startFrame + 1);
     return FMath::Max(
-        minimumGapWidth,
+        minimumBlockWidth,
         static_cast<float>(durationSeconds) * pixelsPerSecond * zoom);
 }
 
@@ -60,7 +49,7 @@ float FHandposeTimelineLayout::getTotalWidth() const
     float width = 0.0f;
     for (const FHandposeTimelineBlock& block : blocks)
     {
-        width += getBlockWidth(block) + blockSpacing;
+        width += getBlockWidth(block);
     }
     return width;
 }
@@ -121,17 +110,17 @@ float FHandposeTimelineLayout::getTimeAtSliderValue(const float sliderValue) con
     for (const FHandposeTimelineBlock& block : blocks)
     {
         const float blockWidth = getBlockWidth(block);
-        if (targetOffset <= blockOffset + blockWidth + blockSpacing)
+        if (targetOffset <= blockOffset + blockWidth)
         {
             const float alpha = FMath::Clamp(
-                (targetOffset - blockOffset - blockInset) / blockWidth,
+                (targetOffset - blockOffset) / blockWidth,
                 0.0f,
                 1.0f);
             const float startTime = static_cast<float>(frameRate.AsSeconds(block.startFrame));
             const float endTime = static_cast<float>(frameRate.AsSeconds(block.endFrame + 1));
             return FMath::Lerp(startTime, endTime, alpha);
         }
-        blockOffset += blockWidth + blockSpacing;
+        blockOffset += blockWidth;
     }
 
     return loadedAnimation->GetPlayLength();
@@ -194,9 +183,9 @@ float FHandposeTimelineLayout::getOffsetAtTime(const float timeSeconds) const
         {
             const float duration = FMath::Max(endTime - startTime, UE_SMALL_NUMBER);
             const float alpha = FMath::Clamp((timeSeconds - startTime) / duration, 0.0f, 1.0f);
-            return offset + blockInset + alpha * blockWidth;
+            return offset + alpha * blockWidth;
         }
-        offset += blockWidth + blockSpacing;
+        offset += blockWidth;
     }
     return offset;
 }

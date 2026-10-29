@@ -29,6 +29,9 @@ public:
     const TArray<FHandposeTimelineSegment>& getSegments() const;
     float getBlockWidth(const FHandposeTimelineBlock& block) const;
     float getTotalWidth() const;
+    float getOffsetAtFrame(double frame) const;
+    double getFrameAtOffset(float offset) const;
+    int32 getLastFrame() const;
     float getSliderValue(float timeSeconds) const;
     float getTimeAtSliderValue(float sliderValue) const;
 

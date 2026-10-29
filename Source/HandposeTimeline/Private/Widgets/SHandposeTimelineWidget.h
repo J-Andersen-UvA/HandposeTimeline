@@ -1,13 +1,16 @@
 #pragma once
 
+#include "HandposeAssignment.h"
 #include "HandshapeCandidate.h"
 #include "HandposeTimelineSegment.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FHandposeTimelinePlaybackController;
 class SHandposeTimelineTrack;
 class STextBlock;
 class SWindow;
+class UAnimSequence;
 class UAnimSequenceBase;
 class UHandposeTimelineConfig;
 
@@ -37,7 +40,14 @@ private:
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
     void onSegmentSelected(int32 segmentIndex);
-    void onHandshapeChosen(int32 segmentIndex, FName handshapeId);
+    void onHandshapeChosen(
+        int32 segmentIndex,
+        const FHandshapeCandidate& candidate);
+    void onAssignmentSelected(int32 assignmentIndex);
+    void onAssignmentChanged(
+        int32 assignmentIndex,
+        const FHandposeAssignment& assignment,
+        bool isFinal);
     void onPlayheadScrubbed(float timeSeconds);
     void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);
@@ -45,6 +55,8 @@ private:
     void loadConfig(UHandposeTimelineConfig* config);
     void selectSegment(int32 segmentIndex, bool shouldPreview);
     void openHandshapePicker(int32 segmentIndex);
+    void rebuildPreviewAnimation(bool preserveTime);
+    void linkOverlappingAssignments();
     TArray<FHandshapeCandidate> getCandidatesForSegment(
         const FHandposeTimelineSegment& segment,
         FString& errorMessage) const;
@@ -55,9 +67,12 @@ private:
     TArray<FName> getSegmentationBoneNames(const UAnimSequenceBase& animation) const;
     TSharedPtr<FHandposeTimelinePlaybackController> playbackController;
     TWeakObjectPtr<UAnimSequenceBase> loadedAnimation;
+    TStrongObjectPtr<UAnimSequence> previewAnimation;
     TWeakObjectPtr<UHandposeTimelineConfig> loadedConfig;
     TArray<FHandposeTimelineSegment> segments;
+    TArray<FHandposeAssignment> assignments;
     int32 selectedSegmentIndex = INDEX_NONE;
+    int32 selectedAssignmentIndex = INDEX_NONE;
     float timelineZoom = 1.0f;
     TSharedPtr<SHandposeTimelineTrack> timelineTrack;
     TWeakPtr<SWindow> handshapePickerWindow;

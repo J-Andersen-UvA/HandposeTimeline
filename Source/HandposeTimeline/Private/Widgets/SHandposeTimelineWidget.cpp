@@ -17,6 +17,7 @@
 #include "IContentBrowserSingleton.h"
 #include "InputCoreTypes.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
+#include "Preview/HandposePreviewBuilder.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
@@ -224,6 +225,8 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
             .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
             .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+            .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
+            .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
         ]
     ];
 
@@ -392,22 +395,95 @@ void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)
 
 void SHandposeTimelineWidget::onHandshapeChosen(
     const int32 segmentIndex,
-    const FName handshapeId)
+    const FHandshapeCandidate& candidate)
 {
-    if (!segments.IsValidIndex(segmentIndex))
+    if (!segments.IsValidIndex(segmentIndex) || !candidate.isValid())
     {
         return;
     }
 
-    segments[segmentIndex].selectedHandshapeId = handshapeId;
+    segments[segmentIndex].selectedHandshapeId = candidate.handshapeId;
     selectedSegmentIndex = segmentIndex;
+    selectedAssignmentIndex = assignments.IndexOfByPredicate(
+        [segmentIndex](const FHandposeAssignment& assignment)
+        {
+            return assignment.sourceSegmentIndex == segmentIndex;
+        });
+    if (selectedAssignmentIndex == INDEX_NONE)
+    {
+        const FHandposeTimelineSegment& segment = segments[segmentIndex];
+        const int32 blendFrameCount = FMath::Min(
+            6,
+            FMath::Max(0, (segment.getFrameCount() - 1) / 4));
+        FHandposeAssignment& assignment = assignments.AddDefaulted_GetRef();
+        assignment.assignmentId = FGuid::NewGuid();
+        assignment.sourceSegmentIndex = segmentIndex;
+        assignment.blendStartFrame = segment.startFrame;
+        assignment.fullPoseStartFrame = segment.startFrame + blendFrameCount;
+        assignment.fullPoseEndFrame = segment.endFrame - blendFrameCount;
+        assignment.blendEndFrame = segment.endFrame;
+        selectedAssignmentIndex = assignments.Num() - 1;
+    }
+    FHandposeAssignment& assignment = assignments[selectedAssignmentIndex];
+    assignment.handshapeId = candidate.handshapeId;
+    assignment.handshapeAnimation = candidate.handshapeAnimation;
+    linkOverlappingAssignments();
     statusText->SetText(FText::Format(
         LOCTEXT(
             "HandshapeAssigned",
             "Assigned {0} to Segment {1}."),
-        FText::FromName(handshapeId),
+        FText::FromName(candidate.handshapeId),
         FText::AsNumber(segmentIndex + 1)));
+    rebuildPreviewAnimation(true);
     refreshTimeline();
+}
+
+void SHandposeTimelineWidget::onAssignmentSelected(const int32 assignmentIndex)
+{
+    if (!assignments.IsValidIndex(assignmentIndex))
+    {
+        return;
+    }
+    selectedAssignmentIndex = assignmentIndex;
+    selectedSegmentIndex = assignments[assignmentIndex].sourceSegmentIndex;
+    const FHandposeAssignment& assignment = assignments[assignmentIndex];
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "AssignmentSelected",
+            "{0}: influence frames {1}-{2}, full pose frames {3}-{4}."),
+        FText::FromName(assignment.handshapeId),
+        FText::AsNumber(assignment.blendStartFrame),
+        FText::AsNumber(assignment.blendEndFrame),
+        FText::AsNumber(assignment.fullPoseStartFrame),
+        FText::AsNumber(assignment.fullPoseEndFrame)));
+}
+
+void SHandposeTimelineWidget::onAssignmentChanged(
+    const int32 assignmentIndex,
+    const FHandposeAssignment& assignment,
+    const bool isFinal)
+{
+    if (!assignments.IsValidIndex(assignmentIndex))
+    {
+        return;
+    }
+    assignments[assignmentIndex] = assignment;
+    selectedAssignmentIndex = assignmentIndex;
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "AssignmentChanged",
+            "{0}: influence frames {1}-{2}, full pose frames {3}-{4}."),
+        FText::FromName(assignment.handshapeId),
+        FText::AsNumber(assignment.blendStartFrame),
+        FText::AsNumber(assignment.blendEndFrame),
+        FText::AsNumber(assignment.fullPoseStartFrame),
+        FText::AsNumber(assignment.fullPoseEndFrame)));
+    if (isFinal)
+    {
+        linkOverlappingAssignments();
+        rebuildPreviewAnimation(true);
+        refreshTimeline();
+    }
 }
 
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)
@@ -443,9 +519,12 @@ void SHandposeTimelineWidget::onZoomChanged(const float sliderValue)
 void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 {
     loadedAnimation = animation;
+    previewAnimation.Reset();
     playbackController->setAnimation(animation);
     segments.Reset();
+    assignments.Reset();
     selectedSegmentIndex = INDEX_NONE;
+    selectedAssignmentIndex = INDEX_NONE;
 
     if (animation == nullptr)
     {
@@ -676,6 +755,76 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     return candidates;
 }
 
+void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
+{
+    UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
+    if (sourceAnimation == nullptr || assignments.IsEmpty())
+    {
+        previewAnimation.Reset();
+        playbackController->setAnimation(loadedAnimation.Get());
+        return;
+    }
+
+    const float previousTime = preserveTime ? getCurrentTimeSeconds() : 0.0f;
+    TArray<FName> boneNames = loadedConfig.IsValid()
+        ? loadedConfig->getSegmentationSettings().boneNames
+        : getSegmentationBoneNames(*sourceAnimation);
+    const FHandposePreviewBuildResult result = FHandposePreviewBuilder::build(
+        sourceAnimation,
+        assignments,
+        boneNames);
+    if (!result.success || result.animation == nullptr)
+    {
+        statusText->SetText(FText::Format(
+            LOCTEXT("PreviewBuildFailed", "Could not build handpose preview: {0}"),
+            FText::FromString(result.errorMessage)));
+        return;
+    }
+
+    previewAnimation.Reset(result.animation);
+    playbackController->setAnimation(previewAnimation.Get());
+    if (preserveTime)
+    {
+        playbackController->scrubTo(FMath::Clamp(
+            previousTime,
+            0.0f,
+            previewAnimation->GetPlayLength()));
+    }
+}
+
+void SHandposeTimelineWidget::linkOverlappingAssignments()
+{
+    TArray<int32> sortedIndices;
+    sortedIndices.Reserve(assignments.Num());
+    for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
+    {
+        sortedIndices.Add(assignmentIndex);
+    }
+    sortedIndices.Sort(
+        [this](const int32 left, const int32 right)
+        {
+            return assignments[left].blendStartFrame < assignments[right].blendStartFrame;
+        });
+
+    for (int32 sortedIndex = 0; sortedIndex + 1 < sortedIndices.Num(); ++sortedIndex)
+    {
+        FHandposeAssignment& left = assignments[sortedIndices[sortedIndex]];
+        FHandposeAssignment& right = assignments[sortedIndices[sortedIndex + 1]];
+        if (right.blendStartFrame > left.blendEndFrame)
+        {
+            continue;
+        }
+        left.fullPoseEndFrame = FMath::Clamp(
+            right.blendStartFrame,
+            left.fullPoseStartFrame,
+            left.blendEndFrame);
+        right.fullPoseStartFrame = FMath::Clamp(
+            left.blendEndFrame,
+            right.blendStartFrame,
+            right.fullPoseEndFrame);
+    }
+}
+
 void SHandposeTimelineWidget::refreshTimeline()
 {
     if (timelineTrack.IsValid())
@@ -683,7 +832,9 @@ void SHandposeTimelineWidget::refreshTimeline()
         timelineTrack->setTimeline(
             loadedAnimation.Get(),
             segments,
+            assignments,
             selectedSegmentIndex,
+            selectedAssignmentIndex,
             timelineZoom);
     }
 }

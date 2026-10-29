@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Timeline/HandposeTimelineLayout.h"
+#include "Widgets/SHandposeAssignmentLane.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SHorizontalBox;
@@ -19,13 +20,17 @@ public:
         SLATE_ATTRIBUTE(float, CurrentTimeSeconds)
         SLATE_EVENT(FOnHandposeTimelineSegmentSelected, OnSegmentSelected)
         SLATE_EVENT(FOnHandposeTimelineScrubbed, OnScrubbed)
+        SLATE_EVENT(FOnHandposeAssignmentSelected, OnAssignmentSelected)
+        SLATE_EVENT(FOnHandposeAssignmentChanged, OnAssignmentChanged)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& arguments);
     void setTimeline(
         UAnimSequenceBase* animation,
         const TArray<FHandposeTimelineSegment>& segments,
+        const TArray<FHandposeAssignment>& assignments,
         int32 selectedSegmentIndex,
+        int32 selectedAssignmentIndex,
         float zoom);
 
 private:
@@ -37,15 +42,13 @@ private:
         const FHandposeTimelineSegment& segment,
         int32 segmentIndex);
     TSharedRef<SWidget> createGapWidget(const FHandposeTimelineBlock& block) const;
-    TSharedRef<SWidget> createAssignmentWidget(
-        const FHandposeTimelineBlock& block,
-        const FHandposeTimelineSegment* segment);
-
     FHandposeTimelineLayout layout;
     TAttribute<float> currentTimeSeconds;
     FOnHandposeTimelineSegmentSelected onSegmentSelected;
     FOnHandposeTimelineScrubbed onScrubbed;
+    FOnHandposeAssignmentSelected onAssignmentSelected;
+    FOnHandposeAssignmentChanged onAssignmentChanged;
     int32 selectedSegmentIndex = INDEX_NONE;
     TSharedPtr<SHorizontalBox> blockContainer;
-    TSharedPtr<SHorizontalBox> assignmentContainer;
+    TSharedPtr<SHandposeAssignmentLane> assignmentLane;
 };

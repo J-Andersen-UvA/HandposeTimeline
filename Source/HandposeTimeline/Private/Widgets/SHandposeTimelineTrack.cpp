@@ -16,6 +16,8 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
     currentTimeSeconds = arguments._CurrentTimeSeconds;
     onSegmentSelected = arguments._OnSegmentSelected;
     onScrubbed = arguments._OnScrubbed;
+    onAssignmentSelected = arguments._OnAssignmentSelected;
+    onAssignmentChanged = arguments._OnAssignmentChanged;
 
     ChildSlot
     [
@@ -57,7 +59,9 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                 + SVerticalBox::Slot()
                 .AutoHeight()
                 [
-                    SAssignNew(assignmentContainer, SHorizontalBox)
+                    SAssignNew(assignmentLane, SHandposeAssignmentLane)
+                    .OnAssignmentSelected(onAssignmentSelected)
+                    .OnAssignmentChanged(onAssignmentChanged)
                 ]
             ]
         ]
@@ -69,11 +73,22 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
 void SHandposeTimelineTrack::setTimeline(
     UAnimSequenceBase* animation,
     const TArray<FHandposeTimelineSegment>& segments,
+    const TArray<FHandposeAssignment>& assignments,
     const int32 newSelectedSegmentIndex,
+    const int32 selectedAssignmentIndex,
     const float zoom)
 {
     selectedSegmentIndex = newSelectedSegmentIndex;
     layout.setTimeline(animation, segments, zoom);
+    if (assignmentLane.IsValid())
+    {
+        assignmentLane->setTimeline(
+            animation,
+            segments,
+            assignments,
+            selectedAssignmentIndex,
+            zoom);
+    }
     rebuild();
 }
 
@@ -90,13 +105,12 @@ void SHandposeTimelineTrack::onPlayheadScrubbed(const float sliderValue)
 
 void SHandposeTimelineTrack::rebuild()
 {
-    if (!blockContainer.IsValid() || !assignmentContainer.IsValid())
+    if (!blockContainer.IsValid())
     {
         return;
     }
 
     blockContainer->ClearChildren();
-    assignmentContainer->ClearChildren();
     if (layout.getBlocks().IsEmpty())
     {
         blockContainer->AddSlot()
@@ -112,10 +126,6 @@ void SHandposeTimelineTrack::rebuild()
 
     for (const FHandposeTimelineBlock& block : layout.getBlocks())
     {
-        const FHandposeTimelineSegment* segment =
-            !block.isGap() && layout.getSegments().IsValidIndex(block.segmentIndex)
-                ? &layout.getSegments()[block.segmentIndex]
-                : nullptr;
         blockContainer->AddSlot()
         .AutoWidth()
         .Padding(1.0f, 0.0f)
@@ -126,61 +136,7 @@ void SHandposeTimelineTrack::rebuild()
                     layout.getSegments()[block.segmentIndex],
                     block.segmentIndex)
         ];
-        assignmentContainer->AddSlot()
-        .AutoWidth()
-        .Padding(1.0f, 0.0f)
-        [
-            createAssignmentWidget(block, segment)
-        ];
     }
-}
-
-TSharedRef<SWidget> SHandposeTimelineTrack::createAssignmentWidget(
-    const FHandposeTimelineBlock& block,
-    const FHandposeTimelineSegment* segment)
-{
-    const float width = layout.getBlockWidth(block);
-    if (block.isGap() || segment == nullptr)
-    {
-        return SNew(SBox)
-            .WidthOverride(width)
-            .HeightOverride(36.0f)
-            [
-                SNew(SBorder)
-                .BorderImage(FAppStyle::GetBrush(TEXT("WhiteBrush")))
-                .BorderBackgroundColor(FLinearColor(0.07f, 0.07f, 0.07f, 1.0f))
-            ];
-    }
-
-    const bool isAssigned = !segment->selectedHandshapeId.IsNone();
-    return SNew(SBox)
-        .WidthOverride(width)
-        .HeightOverride(36.0f)
-        [
-            SNew(SButton)
-            .ButtonColorAndOpacity(
-                isAssigned
-                    ? FLinearColor(0.08f, 0.34f, 0.2f, 1.0f)
-                    : FLinearColor(0.16f, 0.16f, 0.16f, 1.0f))
-            .ToolTipText(isAssigned
-                ? FText::Format(
-                    LOCTEXT("AssignedHandshapeTooltip", "Assigned: {0}"),
-                    FText::FromName(segment->selectedHandshapeId))
-                : LOCTEXT("UnassignedHandshapeTooltip", "No handshape assigned"))
-            .OnClicked(
-                this,
-                &SHandposeTimelineTrack::onSegmentClicked,
-                block.segmentIndex)
-            [
-                SNew(STextBlock)
-                .Text(isAssigned
-                    ? FText::FromName(segment->selectedHandshapeId)
-                    : LOCTEXT("Unassigned", "Unassigned"))
-                .Justification(ETextJustify::Center)
-                .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-                .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-            ]
-        ];
 }
 
 float SHandposeTimelineTrack::getPlayheadSliderValue() const

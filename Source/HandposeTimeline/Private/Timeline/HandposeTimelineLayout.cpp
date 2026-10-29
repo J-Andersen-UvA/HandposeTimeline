@@ -65,6 +65,40 @@ float FHandposeTimelineLayout::getTotalWidth() const
     return width;
 }
 
+float FHandposeTimelineLayout::getOffsetAtFrame(const double frame) const
+{
+    UAnimSequenceBase* loadedAnimation = animation.Get();
+    if (loadedAnimation == nullptr || !loadedAnimation->GetSamplingFrameRate().IsValid())
+    {
+        return 0.0f;
+    }
+    return getOffsetAtTime(static_cast<float>(
+        frame / loadedAnimation->GetSamplingFrameRate().AsDecimal()));
+}
+
+double FHandposeTimelineLayout::getFrameAtOffset(const float offset) const
+{
+    UAnimSequenceBase* loadedAnimation = animation.Get();
+    const float totalWidth = getTotalWidth();
+    if (loadedAnimation == nullptr ||
+        !loadedAnimation->GetSamplingFrameRate().IsValid() ||
+        totalWidth <= 0.0f)
+    {
+        return 0.0;
+    }
+    const float timeSeconds = getTimeAtSliderValue(
+        FMath::Clamp(offset / totalWidth, 0.0f, 1.0f));
+    return timeSeconds * loadedAnimation->GetSamplingFrameRate().AsDecimal();
+}
+
+int32 FHandposeTimelineLayout::getLastFrame() const
+{
+    const UAnimSequenceBase* loadedAnimation = animation.Get();
+    return loadedAnimation != nullptr
+        ? FMath::Max(0, loadedAnimation->GetNumberOfSampledKeys() - 1)
+        : 0;
+}
+
 float FHandposeTimelineLayout::getSliderValue(const float timeSeconds) const
 {
     const float totalWidth = getTotalWidth();

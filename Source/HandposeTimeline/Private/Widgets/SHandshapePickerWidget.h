@@ -11,7 +11,7 @@ class SWindow;
 template<typename ItemType> class STileView;
 struct FHandshapeCandidate;
 
-DECLARE_DELEGATE_TwoParams(FOnHandshapeChosen, int32, FName)
+DECLARE_DELEGATE_TwoParams(FOnHandshapeChosen, int32, const FHandshapeCandidate&)
 
 class SHandshapePickerWidget : public SCompoundWidget
 {

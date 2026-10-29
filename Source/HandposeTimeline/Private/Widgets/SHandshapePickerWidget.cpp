@@ -206,7 +206,7 @@ FReply SHandshapePickerWidget::onUseHandshapeClicked()
 {
     if (selectedCandidate.IsValid())
     {
-        onHandshapeChosen.ExecuteIfBound(segmentIndex, selectedCandidate->handshapeId);
+        onHandshapeChosen.ExecuteIfBound(segmentIndex, *selectedCandidate);
     }
     if (const TSharedPtr<SWindow> window = ownerWindow.Pin())
     {

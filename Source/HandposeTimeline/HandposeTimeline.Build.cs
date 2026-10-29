@@ -17,6 +17,7 @@ public class HandposeTimeline : ModuleRules
             new[]
             {
                 "AnimationBlueprintLibrary",
+                "AnimationDataController",
                 "AssetRegistry",
                 "ContentBrowser",
                 "CoreUObject",

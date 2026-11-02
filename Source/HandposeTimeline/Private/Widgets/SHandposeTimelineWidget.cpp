@@ -264,6 +264,15 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
     const FGeometry& myGeometry,
     const FKeyEvent& keyEvent)
 {
+    if (keyEvent.GetKey() == EKeys::SpaceBar && !keyEvent.IsRepeat())
+    {
+        return onPlayPauseClicked();
+    }
+    if (keyEvent.GetKey() == EKeys::Delete)
+    {
+        removeSelectedAssignment();
+        return FReply::Handled();
+    }
     if (keyEvent.GetKey() == EKeys::Left)
     {
         stepFrame(-1);
@@ -275,6 +284,16 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
         return FReply::Handled();
     }
     return SCompoundWidget::OnPreviewKeyDown(myGeometry, keyEvent);
+}
+
+FReply SHandposeTimelineWidget::OnPreviewMouseButtonDown(
+    const FGeometry& myGeometry,
+    const FPointerEvent& mouseEvent)
+{
+    FSlateApplication::Get().SetKeyboardFocus(
+        SharedThis(this),
+        EFocusCause::Mouse);
+    return SCompoundWidget::OnPreviewMouseButtonDown(myGeometry, mouseEvent);
 }
 
 FReply SHandposeTimelineWidget::OnMouseWheel(
@@ -606,6 +625,37 @@ void SHandposeTimelineWidget::onAssignmentChanged(
         rebuildPreviewAnimation(true);
         refreshTimeline();
     }
+}
+
+void SHandposeTimelineWidget::removeSelectedAssignment()
+{
+    if (!assignments.IsValidIndex(selectedAssignmentIndex))
+    {
+        return;
+    }
+
+    const FHandposeAssignment removedAssignment = assignments[selectedAssignmentIndex];
+    assignments.RemoveAt(selectedAssignmentIndex);
+    selectedAssignmentIndex = INDEX_NONE;
+
+    if (segments.IsValidIndex(removedAssignment.sourceSegmentIndex))
+    {
+        const int32 replacementIndex = assignments.IndexOfByPredicate(
+            [&removedAssignment](const FHandposeAssignment& assignment)
+            {
+                return assignment.sourceSegmentIndex == removedAssignment.sourceSegmentIndex;
+            });
+        segments[removedAssignment.sourceSegmentIndex].selectedHandshapeId =
+            assignments.IsValidIndex(replacementIndex)
+                ? assignments[replacementIndex].handshapeId
+                : NAME_None;
+    }
+
+    statusText->SetText(FText::Format(
+        LOCTEXT("AssignmentRemoved", "Removed assigned handshape {0}."),
+        FText::FromName(removedAssignment.handshapeId)));
+    rebuildPreviewAnimation(true);
+    refreshTimeline();
 }
 
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)

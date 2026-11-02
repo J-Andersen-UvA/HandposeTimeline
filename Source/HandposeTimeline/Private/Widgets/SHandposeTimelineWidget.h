@@ -30,9 +30,13 @@ public:
     virtual FReply OnPreviewKeyDown(
         const FGeometry& myGeometry,
         const FKeyEvent& keyEvent) override;
+    virtual FReply OnPreviewMouseButtonDown(
+        const FGeometry& myGeometry,
+        const FPointerEvent& mouseEvent) override;
     virtual FReply OnMouseWheel(
         const FGeometry& myGeometry,
         const FPointerEvent& mouseEvent) override;
+    virtual bool SupportsKeyboardFocus() const override { return true; }
     void loadAnimation(UAnimSequenceBase* animation);
     bool canBakeCurrentAnimation() const;
     bool hasAssignments() const { return !assignments.IsEmpty(); }
@@ -61,6 +65,7 @@ private:
         int32 assignmentIndex,
         const FHandposeAssignment& assignment,
         bool isFinal);
+    void removeSelectedAssignment();
     void onPlayheadScrubbed(float timeSeconds);
     void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);

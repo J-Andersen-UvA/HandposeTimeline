@@ -1,5 +1,6 @@
 #include "HandposeTimelineModule.h"
 
+#include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -108,11 +109,28 @@ TSharedRef<SDockTab> FHandposeTimelineModule::spawnHandposeTimelineTab(
     const TSharedRef<SHandposeTimelineWidget> widget =
         SNew(SHandposeTimelineWidget);
     handposeTimelineWidget = widget;
-    return SNew(SDockTab)
+    const TSharedRef<SDockTab> tab = SNew(SDockTab)
         .TabRole(ETabRole::NomadTab)
         [
             widget
         ];
+    tab->SetOnTabActivated(SDockTab::FOnTabActivatedCallback::CreateLambda(
+        [weakWidget = TWeakPtr<SHandposeTimelineWidget>(widget)](
+            const TSharedRef<SDockTab>&,
+            const ETabActivationCause activationCause)
+        {
+            if (activationCause != ETabActivationCause::UserClickedOnTab)
+            {
+                return;
+            }
+            if (const TSharedPtr<SHandposeTimelineWidget> pinnedWidget = weakWidget.Pin())
+            {
+                FSlateApplication::Get().SetKeyboardFocus(
+                    pinnedWidget,
+                    EFocusCause::SetDirectly);
+            }
+        }));
+    return tab;
 }
 
 IMPLEMENT_MODULE(FHandposeTimelineModule, HandposeTimeline)

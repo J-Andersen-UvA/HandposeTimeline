@@ -3,6 +3,7 @@
 #include "Animation/AnimSequence.h"
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "HandposeAsset.h"
 #include "Modules/ModuleManager.h"
 
 UHandposeTimelineConfig::UHandposeTimelineConfig()
@@ -51,11 +52,24 @@ FString UHandposeTimelineConfig::getHandshapeContentPath() const
 TArray<TSoftObjectPtr<UAnimSequence>> UHandposeTimelineConfig::getHandshapePoses() const
 {
     TArray<TSoftObjectPtr<UAnimSequence>> poses = handshapePoses;
-    for (const TSoftObjectPtr<UAnimSequence>& folderPose : findHandshapesInContentFolder())
+    if (getHandposeAssets().IsEmpty())
     {
-        poses.AddUnique(folderPose);
+        for (const TSoftObjectPtr<UAnimSequence>& folderPose : findHandshapesInContentFolder())
+        {
+            poses.AddUnique(folderPose);
+        }
     }
     return poses;
+}
+
+TArray<TSoftObjectPtr<UHandposeAsset>> UHandposeTimelineConfig::getHandposeAssets() const
+{
+    TArray<TSoftObjectPtr<UHandposeAsset>> assets = handposeAssets;
+    for (const TSoftObjectPtr<UHandposeAsset>& folderAsset : findHandposeAssetsInContentFolder())
+    {
+        assets.AddUnique(folderAsset);
+    }
+    return assets;
 }
 
 FString UHandposeTimelineConfig::getBakedAnimationOutputPath() const
@@ -66,7 +80,15 @@ FString UHandposeTimelineConfig::getBakedAnimationOutputPath() const
 void UHandposeTimelineConfig::loadHandshapesFromContentFolder()
 {
     Modify();
-    handshapePoses = findHandshapesInContentFolder();
+    handposeAssets = findHandposeAssetsInContentFolder();
+    if (handposeAssets.IsEmpty())
+    {
+        handshapePoses = findHandshapesInContentFolder();
+    }
+    else
+    {
+        handshapePoses.Reset();
+    }
     MarkPackageDirty();
     PostEditChange();
 }
@@ -101,4 +123,36 @@ UHandposeTimelineConfig::findHandshapesInContentFolder() const
                 right.ToSoftObjectPath().ToString();
         });
     return poses;
+}
+
+TArray<TSoftObjectPtr<UHandposeAsset>>
+UHandposeTimelineConfig::findHandposeAssetsInContentFolder() const
+{
+    TArray<TSoftObjectPtr<UHandposeAsset>> assets;
+    if (handshapeContentFolder.Path.IsEmpty())
+    {
+        return assets;
+    }
+
+    FARFilter filter;
+    filter.PackagePaths.Add(*handshapeContentFolder.Path);
+    filter.ClassPaths.Add(UHandposeAsset::StaticClass()->GetClassPathName());
+    filter.bRecursivePaths = includeHandshapeSubfolders;
+
+    FAssetRegistryModule& assetRegistryModule =
+        FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    TArray<FAssetData> foundAssets;
+    assetRegistryModule.Get().GetAssets(filter, foundAssets);
+    for (const FAssetData& asset : foundAssets)
+    {
+        assets.Add(TSoftObjectPtr<UHandposeAsset>(asset.ToSoftObjectPath()));
+    }
+    assets.Sort(
+        [](const TSoftObjectPtr<UHandposeAsset>& left,
+           const TSoftObjectPtr<UHandposeAsset>& right)
+        {
+            return left.ToSoftObjectPath().ToString() <
+                right.ToSoftObjectPath().ToString();
+        });
+    return assets;
 }

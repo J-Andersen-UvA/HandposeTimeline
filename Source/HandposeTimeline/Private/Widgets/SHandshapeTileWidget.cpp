@@ -13,9 +13,15 @@
 void SHandshapeTileWidget::Construct(const FArguments& arguments)
 {
     candidate = arguments._Candidate;
-    UObject* animation = candidate.IsValid()
-        ? candidate->handshapeAnimation.LoadSynchronous()
-        : nullptr;
+    UObject* previewAsset = nullptr;
+    if (candidate.IsValid())
+    {
+        previewAsset = candidate->previewTexture.LoadSynchronous();
+        if (previewAsset == nullptr)
+        {
+            previewAsset = candidate->handshapeAnimation.LoadSynchronous();
+        }
+    }
 
     TSharedRef<SWidget> previewWidget =
         SNew(SBorder)
@@ -28,10 +34,10 @@ void SHandshapeTileWidget::Construct(const FArguments& arguments)
             .ColorAndOpacity(FSlateColor::UseSubduedForeground())
         ];
 
-    if (animation != nullptr && arguments._ThumbnailPool.IsValid())
+    if (previewAsset != nullptr && arguments._ThumbnailPool.IsValid())
     {
         assetThumbnail = MakeShared<FAssetThumbnail>(
-            animation,
+            previewAsset,
             128,
             128,
             arguments._ThumbnailPool);

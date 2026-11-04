@@ -7,6 +7,7 @@
 #include "HandposeTimelineConfig.generated.h"
 
 class UAnimSequence;
+class UHandposeAsset;
 
 UCLASS(BlueprintType)
 class HANDPOSETIMELINE_API UHandposeTimelineConfig : public UDataAsset
@@ -35,6 +36,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
     TArray<TSoftObjectPtr<UAnimSequence>> handshapePoses;
 
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
+    TArray<TSoftObjectPtr<UHandposeAsset>> handposeAssets;
+
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
@@ -51,8 +55,10 @@ public:
     FHandshapeSegmentationSettings getSegmentationSettings() const;
     FString getHandshapeContentPath() const;
     TArray<TSoftObjectPtr<UAnimSequence>> getHandshapePoses() const;
+    TArray<TSoftObjectPtr<UHandposeAsset>> getHandposeAssets() const;
     FString getBakedAnimationOutputPath() const;
 
 private:
     TArray<TSoftObjectPtr<UAnimSequence>> findHandshapesInContentFolder() const;
+    TArray<TSoftObjectPtr<UHandposeAsset>> findHandposeAssetsInContentFolder() const;
 };

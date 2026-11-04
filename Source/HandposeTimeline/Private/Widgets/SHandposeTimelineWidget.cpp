@@ -14,6 +14,7 @@
 #include "HandshapeSegmentationTypes.h"
 #include "HandshapeMatchingBlueprintLibrary.h"
 #include "HandshapeMatchingTypes.h"
+#include "HandposeAsset.h"
 #include "HandposeTimelineConfig.h"
 #include "IContentBrowserSingleton.h"
 #include "InputCoreTypes.h"
@@ -783,11 +784,12 @@ void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
     statusText->SetText(FText::Format(
         LOCTEXT(
             "ConfigLoaded",
-            "Loaded {0}: {1} segmentation bones, handshape folder {2}, and {3} available handshape poses."),
+            "Loaded {0}: {1} segmentation bones, handshape folder {2}, and {3} available handshape entries."),
         FText::FromString(config->GetName()),
         FText::AsNumber(config->segmentationSettings.boneNames.Num()),
         FText::FromString(config->getHandshapeContentPath()),
-        FText::AsNumber(config->getHandshapePoses().Num())));
+        FText::AsNumber(
+            config->getHandposeAssets().Num() + config->getHandshapePoses().Num())));
 
     if (loadedAnimation.IsValid())
     {
@@ -898,11 +900,31 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     }
 
     TArray<UAnimSequenceBase*> handshapeAnimations;
+    TMultiMap<UAnimSequenceBase*, UHandposeAsset*> assetsByPredictionHandpose;
+    for (const TSoftObjectPtr<UHandposeAsset>& assetReference : config->getHandposeAssets())
+    {
+        UHandposeAsset* handposeAsset = assetReference.LoadSynchronous();
+        if (handposeAsset == nullptr || !handposeAsset->isValid())
+        {
+            continue;
+        }
+
+        UAnimSequence* predictionHandpose = handposeAsset->predictionHandpose.LoadSynchronous();
+        UAnimSequence* postProcessedHandpose =
+            handposeAsset->postProcessedHandpose.LoadSynchronous();
+        if (predictionHandpose == nullptr || postProcessedHandpose == nullptr)
+        {
+            continue;
+        }
+
+        handshapeAnimations.AddUnique(predictionHandpose);
+        assetsByPredictionHandpose.Add(predictionHandpose, handposeAsset);
+    }
     for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
     {
         if (UAnimSequence* handshapeAnimation = handshapeReference.LoadSynchronous())
         {
-            handshapeAnimations.Add(handshapeAnimation);
+            handshapeAnimations.AddUnique(handshapeAnimation);
         }
     }
     if (handshapeAnimations.IsEmpty())
@@ -929,11 +951,27 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     candidates.Reserve(matchingResult.matches.Num());
     for (const FHandshapeMatch& match : matchingResult.matches)
     {
-        FHandshapeCandidate& candidate = candidates.AddDefaulted_GetRef();
-        candidate.handshapeId = match.handshapeId;
-        candidate.displayName = FText::FromName(match.handshapeId);
-        candidate.handshapeAnimation = match.handshapeAnimation;
-        candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
+        TArray<UHandposeAsset*> linkedAssets;
+        assetsByPredictionHandpose.MultiFind(match.handshapeAnimation, linkedAssets);
+        if (linkedAssets.IsEmpty())
+        {
+            FHandshapeCandidate& candidate = candidates.AddDefaulted_GetRef();
+            candidate.handshapeId = match.handshapeId;
+            candidate.displayName = FText::FromName(match.handshapeId);
+            candidate.handshapeAnimation = match.handshapeAnimation;
+            candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
+            continue;
+        }
+
+        for (UHandposeAsset* handposeAsset : linkedAssets)
+        {
+            FHandshapeCandidate& candidate = candidates.AddDefaulted_GetRef();
+            candidate.handshapeId = handposeAsset->GetFName();
+            candidate.displayName = FText::FromString(handposeAsset->GetName());
+            candidate.previewTexture = handposeAsset->thumbnail;
+            candidate.handshapeAnimation = handposeAsset->postProcessedHandpose;
+            candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
+        }
     }
     FHandshapeCandidate::sortByRelevance(candidates);
     return candidates;

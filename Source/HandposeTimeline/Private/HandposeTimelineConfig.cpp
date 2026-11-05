@@ -8,7 +8,7 @@
 
 UHandposeTimelineConfig::UHandposeTimelineConfig()
 {
-    segmentationSettings.boneNames = {
+    rightHandBoneNames = {
         TEXT("RightHandIndex"),
         TEXT("RightHandIndex1"),
         TEXT("RightHandIndex2"),
@@ -30,18 +30,73 @@ UHandposeTimelineConfig::UHandposeTimelineConfig()
         TEXT("RightHandRing2"),
         TEXT("RightHandRing3")
     };
-    segmentationSettings.minimumSegmentLength = 2;
-    segmentationSettings.minimumAccelerationThreshold = 0.25;
-    segmentationSettings.quaternionSmoothingSigma = 1.5;
-    segmentationSettings.accelerationSmoothingSigma = 1.5;
-    segmentationSettings.thresholdFactor = 0.5;
-    handshapeContentFolder.Path = TEXT("/HandposeTimeline/HandposeTimeline/Handshapes");
+    leftHandBoneNames = rightHandBoneNames;
+    for (FName& boneName : leftHandBoneNames)
+    {
+        FString leftBoneName = boneName.ToString();
+        leftBoneName.ReplaceInline(TEXT("Right"), TEXT("Left"));
+        boneName = FName(leftBoneName);
+    }
+    handshapeContentFolder.Path = TEXT("/HandposeTimeline/HandposeTimeline/Handposes");
     bakedAnimationOutputFolder.Path = TEXT("/Game/HandposeTimeline/Baked");
+}
+
+void UHandposeTimelineConfig::PostLoad()
+{
+    Super::PostLoad();
+    if (segmentationSettings_DEPRECATED.boneNames.IsEmpty())
+    {
+        return;
+    }
+
+    rightHandBoneNames = segmentationSettings_DEPRECATED.boneNames;
+    leftHandBoneNames = leftHandSegmentationSettings_DEPRECATED.boneNames;
+    if (leftHandBoneNames.IsEmpty())
+    {
+        leftHandBoneNames = rightHandBoneNames;
+        for (FName& boneName : leftHandBoneNames)
+        {
+            FString leftBoneName = boneName.ToString();
+            leftBoneName.ReplaceInline(TEXT("Right"), TEXT("Left"));
+            boneName = FName(leftBoneName);
+        }
+    }
+    sharedSegmentationSettings.minimumSegmentLength =
+        segmentationSettings_DEPRECATED.minimumSegmentLength;
+    sharedSegmentationSettings.minimumAccelerationThreshold =
+        segmentationSettings_DEPRECATED.minimumAccelerationThreshold;
+    sharedSegmentationSettings.quaternionSmoothingSigma =
+        segmentationSettings_DEPRECATED.quaternionSmoothingSigma;
+    sharedSegmentationSettings.accelerationSmoothingSigma =
+        segmentationSettings_DEPRECATED.accelerationSmoothingSigma;
+    sharedSegmentationSettings.thresholdFactor =
+        segmentationSettings_DEPRECATED.thresholdFactor;
+    segmentationSettings_DEPRECATED.boneNames.Reset();
+    leftHandSegmentationSettings_DEPRECATED.boneNames.Reset();
+    MarkPackageDirty();
 }
 
 FHandshapeSegmentationSettings UHandposeTimelineConfig::getSegmentationSettings() const
 {
-    return segmentationSettings;
+    return getSegmentationSettings(EHandposeSide::Right);
+}
+
+FHandshapeSegmentationSettings UHandposeTimelineConfig::getSegmentationSettings(
+    const EHandposeSide handSide) const
+{
+    FHandshapeSegmentationSettings settings;
+    settings.boneNames = handSide == EHandposeSide::Left
+        ? leftHandBoneNames
+        : rightHandBoneNames;
+    settings.minimumSegmentLength = sharedSegmentationSettings.minimumSegmentLength;
+    settings.minimumAccelerationThreshold =
+        sharedSegmentationSettings.minimumAccelerationThreshold;
+    settings.quaternionSmoothingSigma =
+        sharedSegmentationSettings.quaternionSmoothingSigma;
+    settings.accelerationSmoothingSigma =
+        sharedSegmentationSettings.accelerationSmoothingSigma;
+    settings.thresholdFactor = sharedSegmentationSettings.thresholdFactor;
+    return settings;
 }
 
 FString UHandposeTimelineConfig::getHandshapeContentPath() const

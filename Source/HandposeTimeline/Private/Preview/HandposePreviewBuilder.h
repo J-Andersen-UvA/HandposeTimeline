@@ -18,5 +18,6 @@ public:
     static FHandposePreviewBuildResult build(
         UAnimSequence* sourceAnimation,
         const TArray<FHandposeAssignment>& assignments,
-        const TArray<FName>& boneNames);
+        const TArray<FName>& rightBoneNames,
+        const TArray<FName>& leftBoneNames);
 };

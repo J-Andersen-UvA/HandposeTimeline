@@ -7,6 +7,7 @@
 class UAnimSequenceBase;
 
 DECLARE_DELEGATE_OneParam(FOnHandposeAssignmentSelected, int32)
+DECLARE_DELEGATE_OneParam(FOnHandposeAssignmentFingerEditRequested, int32)
 DECLARE_DELEGATE_ThreeParams(
     FOnHandposeAssignmentChanged,
     int32,
@@ -20,6 +21,9 @@ public:
     {
     }
         SLATE_EVENT(FOnHandposeAssignmentSelected, OnAssignmentSelected)
+        SLATE_EVENT(
+            FOnHandposeAssignmentFingerEditRequested,
+            OnFingerEditRequested)
         SLATE_EVENT(FOnHandposeAssignmentChanged, OnAssignmentChanged)
     SLATE_END_ARGS()
 
@@ -80,5 +84,6 @@ private:
     FHandposeAssignment assignmentAtDragStart;
     int32 cursorFrameAtDragStart = 0;
     FOnHandposeAssignmentSelected onAssignmentSelected;
+    FOnHandposeAssignmentFingerEditRequested onFingerEditRequested;
     FOnHandposeAssignmentChanged onAssignmentChanged;
 };

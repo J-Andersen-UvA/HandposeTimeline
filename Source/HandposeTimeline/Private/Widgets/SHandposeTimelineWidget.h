@@ -7,6 +7,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FHandposeTimelinePlaybackController;
+class SScrollBox;
 class SHandposeTimelineTrack;
 class STextBlock;
 class SWindow;
@@ -39,7 +40,7 @@ public:
     virtual bool SupportsKeyboardFocus() const override { return true; }
     void loadAnimation(UAnimSequenceBase* animation);
     bool canBakeCurrentAnimation() const;
-    bool hasAssignments() const { return !assignments.IsEmpty(); }
+    bool hasAssignments() const;
     bool bakeCurrentAnimation(
         UAnimSequence*& outputAnimation,
         FString& outputPath,
@@ -56,43 +57,76 @@ private:
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
     FReply onBakeClicked();
-    void onSegmentSelected(int32 segmentIndex);
+    void onSegmentSelected(EHandposeSide handSide, int32 segmentIndex);
     void onHandshapeChosen(
         int32 segmentIndex,
         const FHandshapeCandidate& candidate);
-    void onAssignmentSelected(int32 assignmentIndex);
+    void onAssignmentSelected(EHandposeSide handSide, int32 assignmentIndex);
     void onAssignmentChanged(
+        EHandposeSide handSide,
         int32 assignmentIndex,
         const FHandposeAssignment& assignment,
         bool isFinal);
+    void onAssignmentFingerEditRequested(
+        EHandposeSide handSide,
+        int32 assignmentIndex);
+    void onAssignmentSkippedFingersChosen(
+        const TArray<EHandposeFinger>& skippedFingers,
+        EHandposeSide handSide,
+        int32 assignmentIndex);
     void removeSelectedAssignment();
     void onPlayheadScrubbed(float timeSeconds);
     void stepFrame(int32 frameOffset);
     void onZoomChanged(float sliderValue);
     void onZoomWheel(float wheelDelta);
     void loadConfig(UHandposeTimelineConfig* config);
-    void selectSegment(int32 segmentIndex, bool shouldPreview);
-    void openHandshapePicker(int32 segmentIndex);
+    void restoreLastConfig();
+    void saveLastConfig(const UHandposeTimelineConfig& config) const;
+    void selectSegment(EHandposeSide handSide, int32 segmentIndex, bool shouldPreview);
+    void openHandshapePicker(EHandposeSide handSide, int32 segmentIndex);
     void rebuildPreviewAnimation(bool preserveTime);
-    void linkOverlappingAssignments();
+    void linkOverlappingAssignments(EHandposeSide handSide);
+    void updateAssignmentCoverage(EHandposeSide handSide);
     TArray<FHandshapeCandidate> getCandidatesForSegment(
+        EHandposeSide handSide,
         const FHandposeTimelineSegment& segment,
         FString& errorMessage) const;
+    bool generateSegments(
+        UAnimSequenceBase& animation,
+        EHandposeSide handSide,
+        TArray<FHandposeTimelineSegment>& outputSegments,
+        FString& errorMessage) const;
+    TArray<FHandposeTimelineSegment>& getSegments(EHandposeSide handSide);
+    const TArray<FHandposeTimelineSegment>& getSegments(EHandposeSide handSide) const;
+    TArray<FHandposeAssignment>& getAssignments(EHandposeSide handSide);
+    const TArray<FHandposeAssignment>& getAssignments(EHandposeSide handSide) const;
+    int32& getSelectedSegmentIndex(EHandposeSide handSide);
+    int32& getSelectedAssignmentIndex(EHandposeSide handSide);
+    TArray<FHandposeAssignment> getAllAssignments() const;
     void refreshTimeline();
     float getCurrentTimeSeconds() const;
     FText getPlayPauseButtonText() const;
     FText getTimecodeText() const;
-    TArray<FName> getSegmentationBoneNames(const UAnimSequenceBase& animation) const;
+    TArray<FName> getSegmentationBoneNames(
+        const UAnimSequenceBase& animation,
+        EHandposeSide handSide) const;
     TSharedPtr<FHandposeTimelinePlaybackController> playbackController;
     TWeakObjectPtr<UAnimSequenceBase> loadedAnimation;
     TStrongObjectPtr<UAnimSequence> previewAnimation;
-    TWeakObjectPtr<UHandposeTimelineConfig> loadedConfig;
-    TArray<FHandposeTimelineSegment> segments;
-    TArray<FHandposeAssignment> assignments;
-    int32 selectedSegmentIndex = INDEX_NONE;
-    int32 selectedAssignmentIndex = INDEX_NONE;
+    TStrongObjectPtr<UHandposeTimelineConfig> loadedConfig;
+    TArray<FHandposeTimelineSegment> rightSegments;
+    TArray<FHandposeTimelineSegment> leftSegments;
+    TArray<FHandposeAssignment> rightAssignments;
+    TArray<FHandposeAssignment> leftAssignments;
+    int32 selectedRightSegmentIndex = INDEX_NONE;
+    int32 selectedLeftSegmentIndex = INDEX_NONE;
+    int32 selectedRightAssignmentIndex = INDEX_NONE;
+    int32 selectedLeftAssignmentIndex = INDEX_NONE;
+    EHandposeSide selectedHandSide = EHandposeSide::Right;
     float timelineZoom = 1.0f;
-    TSharedPtr<SHandposeTimelineTrack> timelineTrack;
+    TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
+    TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;
+    TSharedPtr<SHandposeTimelineTrack> leftTimelineTrack;
     TWeakPtr<SWindow> handshapePickerWindow;
     TSharedPtr<STextBlock> configNameText;
     TSharedPtr<STextBlock> animationNameText;

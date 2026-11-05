@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HandposeAsset.h"
+#include "HandposeFinger.h"
 #include "UObject/SoftObjectPtr.h"
 #include "HandposeAssignment.generated.h"
 
@@ -22,6 +24,15 @@ struct HANDPOSETIMELINE_API FHandposeAssignment
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
     TSoftObjectPtr<UAnimSequenceBase> handshapeAnimation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
+    EHandposeSide handSide = EHandposeSide::Right;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
+    TArray<EHandposeFinger> skippedFingers;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Handpose Timeline")
+    TArray<int32> coveredSegmentIndices;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
     int32 blendStartFrame = INDEX_NONE;

@@ -17,6 +17,33 @@ struct FActiveHandshape
     float weight = 0.0f;
 };
 
+bool isSkippedFinger(
+    const FName boneName,
+    const TArray<EHandposeFinger>& skippedFingers)
+{
+    const FString normalizedBoneName = boneName.ToString().ToLower();
+    return skippedFingers.ContainsByPredicate(
+        [&normalizedBoneName](const EHandposeFinger finger)
+        {
+            switch (finger)
+            {
+            case EHandposeFinger::Thumb:
+                return normalizedBoneName.Contains(TEXT("thumb"));
+            case EHandposeFinger::Index:
+                return normalizedBoneName.Contains(TEXT("index"));
+            case EHandposeFinger::Middle:
+                return normalizedBoneName.Contains(TEXT("middle"));
+            case EHandposeFinger::Ring:
+                return normalizedBoneName.Contains(TEXT("ring"));
+            case EHandposeFinger::Pinky:
+                return normalizedBoneName.Contains(TEXT("pinky")) ||
+                    normalizedBoneName.Contains(TEXT("little"));
+            default:
+                return false;
+            }
+        });
+}
+
 FAnimPoseEvaluationOptions makeEvaluationOptions()
 {
     FAnimPoseEvaluationOptions options;
@@ -173,12 +200,23 @@ FQuat evaluateRotation(
 FHandposePreviewBuildResult FHandposePreviewBuilder::build(
     UAnimSequence* sourceAnimation,
     const TArray<FHandposeAssignment>& assignments,
-    const TArray<FName>& boneNames)
+    const TArray<FName>& rightBoneNames,
+    const TArray<FName>& leftBoneNames)
 {
     FHandposePreviewBuildResult result;
-    if (sourceAnimation == nullptr || assignments.IsEmpty() || boneNames.IsEmpty())
+    if (sourceAnimation == nullptr || assignments.IsEmpty())
     {
         result.errorMessage = TEXT("Source animation, assignments, and hand bones are required.");
+        return result;
+    }
+    TArray<FName> boneNames = rightBoneNames;
+    for (const FName boneName : leftBoneNames)
+    {
+        boneNames.AddUnique(boneName);
+    }
+    if (boneNames.IsEmpty())
+    {
+        result.errorMessage = TEXT("No hand bones are configured.");
         return result;
     }
     const USkeleton* sourceSkeleton = sourceAnimation->GetSkeleton();
@@ -208,12 +246,31 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
     rotationsByAssignment.SetNum(assignments.Num());
     for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
     {
+        const TArray<FName>& handBoneNames =
+            assignments[assignmentIndex].handSide == EHandposeSide::Left
+                ? leftBoneNames
+                : rightBoneNames;
+        if (handBoneNames.IsEmpty())
+        {
+            result.errorMessage = TEXT("An assigned handshape has no configured hand bones.");
+            return result;
+        }
+        TArray<FName> assignmentBoneNames;
+        for (const FName boneName : handBoneNames)
+        {
+            if (!isSkippedFinger(
+                    boneName,
+                    assignments[assignmentIndex].skippedFingers))
+            {
+                assignmentBoneNames.Add(boneName);
+            }
+        }
         UAnimSequenceBase* handshapeAnimation =
             assignments[assignmentIndex].handshapeAnimation.LoadSynchronous();
         if (handshapeAnimation == nullptr ||
             !calculateAverageRotations(
                 *handshapeAnimation,
-                boneNames,
+                assignmentBoneNames,
                 rotationsByAssignment[assignmentIndex],
                 result.errorMessage))
         {
@@ -251,6 +308,16 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
 
         for (const FName boneName : boneNames)
         {
+            TArray<FActiveHandshape> activeHandshapesForBone;
+            for (const FActiveHandshape& activeHandshape : activeHandshapes)
+            {
+                const int32 assignmentIndex = static_cast<int32>(
+                    activeHandshape.assignment - assignments.GetData());
+                if (rotationsByAssignment[assignmentIndex].Contains(boneName))
+                {
+                    activeHandshapesForBone.Add(activeHandshape);
+                }
+            }
             const FTransform baseTransform = UAnimPoseExtensions::GetBonePose(
                 sourcePoses[frame],
                 boneName,
@@ -258,7 +325,7 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
             translationsByBone.FindChecked(boneName).Add(baseTransform.GetTranslation());
             rotationsByBone.FindChecked(boneName).Add(evaluateRotation(
                 baseTransform.GetRotation(),
-                activeHandshapes,
+                activeHandshapesForBone,
                 rotationsByAssignment,
                 boneName,
                 assignments));

@@ -17,6 +17,7 @@ constexpr int32 curveSampleCount = 32;
 void SHandposeAssignmentLane::Construct(const FArguments& arguments)
 {
     onAssignmentSelected = arguments._OnAssignmentSelected;
+    onFingerEditRequested = arguments._OnFingerEditRequested;
     onAssignmentChanged = arguments._OnAssignmentChanged;
     SetCanTick(false);
 }
@@ -208,7 +209,9 @@ FReply SHandposeAssignmentLane::OnMouseButtonDown(
     const FGeometry& myGeometry,
     const FPointerEvent& mouseEvent)
 {
-    if (mouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+    const FKey mouseButton = mouseEvent.GetEffectingButton();
+    if (mouseButton != EKeys::LeftMouseButton &&
+        mouseButton != EKeys::RightMouseButton)
     {
         return FReply::Unhandled();
     }
@@ -221,13 +224,19 @@ FReply SHandposeAssignmentLane::OnMouseButtonDown(
     }
 
     selectedAssignmentIndex = hit.assignmentIndex;
+    onAssignmentSelected.ExecuteIfBound(hit.assignmentIndex);
+    Invalidate(EInvalidateWidgetReason::Paint);
+    if (mouseButton == EKeys::RightMouseButton)
+    {
+        onFingerEditRequested.ExecuteIfBound(hit.assignmentIndex);
+        return FReply::Handled();
+    }
+
     draggedAssignmentIndex = hit.assignmentIndex;
     dragTarget = hit.target;
     assignmentAtDragStart = assignments[hit.assignmentIndex];
     cursorFrameAtDragStart = FMath::RoundToInt(
         layout.getFrameAtOffset(localPosition.X));
-    onAssignmentSelected.ExecuteIfBound(hit.assignmentIndex);
-    Invalidate(EInvalidateWidgetReason::Paint);
     return FReply::Handled().CaptureMouse(SharedThis(this));
 }
 

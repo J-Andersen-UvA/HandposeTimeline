@@ -4,61 +4,42 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineTrack"
 
-class SHandposeTimelineScrollBox : public SScrollBox
-{
-public:
-    void setOnZoomWheel(const FOnHandposeTimelineZoomWheel& delegate)
-    {
-        onZoomWheel = delegate;
-    }
-
-    virtual FReply OnMouseWheel(
-        const FGeometry& myGeometry,
-        const FPointerEvent& mouseEvent) override
-    {
-        if (mouseEvent.IsControlDown())
-        {
-            onZoomWheel.ExecuteIfBound(mouseEvent.GetWheelDelta());
-            return FReply::Handled();
-        }
-        return SScrollBox::OnMouseWheel(myGeometry, mouseEvent);
-    }
-
-private:
-    FOnHandposeTimelineZoomWheel onZoomWheel;
-};
-
 void SHandposeTimelineTrack::Construct(const FArguments& arguments)
 {
+    handSide = arguments._HandSide;
     currentTimeSeconds = arguments._CurrentTimeSeconds;
     onSegmentSelected = arguments._OnSegmentSelected;
     onScrubbed = arguments._OnScrubbed;
-    onZoomWheel = arguments._OnZoomWheel;
     onAssignmentSelected = arguments._OnAssignmentSelected;
     onAssignmentChanged = arguments._OnAssignmentChanged;
+    onAssignmentFingerEditRequested = arguments._OnAssignmentFingerEditRequested;
 
-    TSharedPtr<SHandposeTimelineScrollBox> scrollBox;
     ChildSlot
     [
         SNew(SBorder)
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
         .Padding(12.0f)
         [
-            SAssignNew(scrollBox, SHandposeTimelineScrollBox)
-            .Orientation(Orient_Horizontal)
-            + SScrollBox::Slot()
-            [
-                SNew(SOverlay)
+            SNew(SOverlay)
                 + SOverlay::Slot()
                 [
                     SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 5.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(handSide == EHandposeSide::Left
+                            ? LOCTEXT("LeftHandTrack", "Left Hand")
+                            : LOCTEXT("RightHandTrack", "Right Hand"))
+                        .Font(FAppStyle::GetFontStyle(TEXT("BoldFont")))
+                    ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     [
@@ -84,8 +65,15 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                     .AutoHeight()
                     [
                         SAssignNew(assignmentLane, SHandposeAssignmentLane)
-                        .OnAssignmentSelected(onAssignmentSelected)
-                        .OnAssignmentChanged(onAssignmentChanged)
+                        .OnAssignmentSelected(
+                            this,
+                            &SHandposeTimelineTrack::handleAssignmentSelected)
+                        .OnFingerEditRequested(
+                            this,
+                            &SHandposeTimelineTrack::handleAssignmentFingerEditRequested)
+                        .OnAssignmentChanged(
+                            this,
+                            &SHandposeTimelineTrack::handleAssignmentChanged)
                     ]
                 ]
                 + SOverlay::Slot()
@@ -93,11 +81,8 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                     SAssignNew(playheadOverlay, SHandposeTimelinePlayheadOverlay)
                     .CurrentTimeSeconds(currentTimeSeconds)
                 ]
-            ]
         ]
     ];
-
-    scrollBox->setOnZoomWheel(onZoomWheel);
 
     rebuild();
 }
@@ -111,6 +96,14 @@ void SHandposeTimelineTrack::setTimeline(
     const float zoom)
 {
     selectedSegmentIndex = newSelectedSegmentIndex;
+    highlightedSegmentIndices.Reset();
+    if (assignments.IsValidIndex(selectedAssignmentIndex))
+    {
+        highlightedSegmentIndices.Append(
+            assignments[selectedAssignmentIndex].coveredSegmentIndices);
+        highlightedSegmentIndices.Add(
+            assignments[selectedAssignmentIndex].sourceSegmentIndex);
+    }
     layout.setTimeline(animation, segments, zoom);
     if (frameRuler.IsValid())
     {
@@ -134,8 +127,31 @@ void SHandposeTimelineTrack::setTimeline(
 
 FReply SHandposeTimelineTrack::onSegmentClicked(const int32 segmentIndex)
 {
-    onSegmentSelected.ExecuteIfBound(segmentIndex);
+    onSegmentSelected.ExecuteIfBound(handSide, segmentIndex);
     return FReply::Handled();
+}
+
+void SHandposeTimelineTrack::handleAssignmentSelected(const int32 assignmentIndex)
+{
+    onAssignmentSelected.ExecuteIfBound(handSide, assignmentIndex);
+}
+
+void SHandposeTimelineTrack::handleAssignmentChanged(
+    const int32 assignmentIndex,
+    const FHandposeAssignment& assignment,
+    const bool isFinal)
+{
+    onAssignmentChanged.ExecuteIfBound(
+        handSide,
+        assignmentIndex,
+        assignment,
+        isFinal);
+}
+
+void SHandposeTimelineTrack::handleAssignmentFingerEditRequested(
+    const int32 assignmentIndex)
+{
+    onAssignmentFingerEditRequested.ExecuteIfBound(handSide, assignmentIndex);
 }
 
 void SHandposeTimelineTrack::onPlayheadScrubbed(const float timeSeconds)
@@ -188,7 +204,8 @@ TSharedRef<SWidget> SHandposeTimelineTrack::createSegmentWidget(
             return candidate.segmentIndex == segmentIndex;
         });
     const float segmentWidth = block != nullptr ? layout.getBlockWidth(*block) : 0.0f;
-    const bool isSelected = selectedSegmentIndex == segmentIndex;
+    const bool isSelected = selectedSegmentIndex == segmentIndex ||
+        highlightedSegmentIndices.Contains(segmentIndex);
 
     return SNew(SBox)
         .WidthOverride(segmentWidth)

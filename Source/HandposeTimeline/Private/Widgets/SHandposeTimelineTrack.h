@@ -1,5 +1,6 @@
 #pragma once
 
+#include "HandposeAsset.h"
 #include "Timeline/HandposeTimelineLayout.h"
 #include "Widgets/SHandposeAssignmentLane.h"
 #include "Widgets/SHandposeTimelineRuler.h"
@@ -8,23 +9,43 @@
 class SHorizontalBox;
 class UAnimSequenceBase;
 
-DECLARE_DELEGATE_OneParam(FOnHandposeTimelineSegmentSelected, int32)
+DECLARE_DELEGATE_TwoParams(
+    FOnHandposeTimelineSegmentSelected,
+    EHandposeSide,
+    int32)
 DECLARE_DELEGATE_OneParam(FOnHandposeTimelineScrubbed, float)
-DECLARE_DELEGATE_OneParam(FOnHandposeTimelineZoomWheel, float)
+DECLARE_DELEGATE_TwoParams(
+    FOnHandposeTimelineAssignmentSelected,
+    EHandposeSide,
+    int32)
+DECLARE_DELEGATE_FourParams(
+    FOnHandposeTimelineAssignmentChanged,
+    EHandposeSide,
+    int32,
+    const FHandposeAssignment&,
+    bool)
+DECLARE_DELEGATE_TwoParams(
+    FOnHandposeTimelineAssignmentFingerEditRequested,
+    EHandposeSide,
+    int32)
 
 class SHandposeTimelineTrack : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SHandposeTimelineTrack)
-        : _CurrentTimeSeconds(0.0f)
+        : _HandSide(EHandposeSide::Right)
+        , _CurrentTimeSeconds(0.0f)
     {
     }
+        SLATE_ARGUMENT(EHandposeSide, HandSide)
         SLATE_ATTRIBUTE(float, CurrentTimeSeconds)
         SLATE_EVENT(FOnHandposeTimelineSegmentSelected, OnSegmentSelected)
         SLATE_EVENT(FOnHandposeTimelineScrubbed, OnScrubbed)
-        SLATE_EVENT(FOnHandposeTimelineZoomWheel, OnZoomWheel)
-        SLATE_EVENT(FOnHandposeAssignmentSelected, OnAssignmentSelected)
-        SLATE_EVENT(FOnHandposeAssignmentChanged, OnAssignmentChanged)
+        SLATE_EVENT(FOnHandposeTimelineAssignmentSelected, OnAssignmentSelected)
+        SLATE_EVENT(FOnHandposeTimelineAssignmentChanged, OnAssignmentChanged)
+        SLATE_EVENT(
+            FOnHandposeTimelineAssignmentFingerEditRequested,
+            OnAssignmentFingerEditRequested)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& arguments);
@@ -38,6 +59,12 @@ public:
 
 private:
     FReply onSegmentClicked(int32 segmentIndex);
+    void handleAssignmentSelected(int32 assignmentIndex);
+    void handleAssignmentChanged(
+        int32 assignmentIndex,
+        const FHandposeAssignment& assignment,
+        bool isFinal);
+    void handleAssignmentFingerEditRequested(int32 assignmentIndex);
     void onPlayheadScrubbed(float timeSeconds);
     void rebuild();
     TSharedRef<SWidget> createSegmentWidget(
@@ -48,10 +75,12 @@ private:
     TAttribute<float> currentTimeSeconds;
     FOnHandposeTimelineSegmentSelected onSegmentSelected;
     FOnHandposeTimelineScrubbed onScrubbed;
-    FOnHandposeTimelineZoomWheel onZoomWheel;
-    FOnHandposeAssignmentSelected onAssignmentSelected;
-    FOnHandposeAssignmentChanged onAssignmentChanged;
+    FOnHandposeTimelineAssignmentSelected onAssignmentSelected;
+    FOnHandposeTimelineAssignmentChanged onAssignmentChanged;
+    FOnHandposeTimelineAssignmentFingerEditRequested onAssignmentFingerEditRequested;
+    EHandposeSide handSide = EHandposeSide::Right;
     int32 selectedSegmentIndex = INDEX_NONE;
+    TSet<int32> highlightedSegmentIndices;
     TSharedPtr<SHorizontalBox> blockContainer;
     TSharedPtr<SHandposeAssignmentLane> assignmentLane;
     TSharedPtr<SHandposeTimelineRuler> frameRuler;

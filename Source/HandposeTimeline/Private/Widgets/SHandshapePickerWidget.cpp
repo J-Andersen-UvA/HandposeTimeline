@@ -1,9 +1,11 @@
 #include "Widgets/SHandshapePickerWidget.h"
 
 #include "AssetThumbnail.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HandshapeCandidate.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -11,7 +13,9 @@
 #include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SHandshapeTileWidget.h"
+#include "Widgets/SHandposeFingerSelectionWidget.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STileView.h"
 
@@ -59,6 +63,22 @@ void SHandshapePickerWidget::Construct(const FArguments& arguments)
                 SNew(SSearchBox)
                 .HintText(LOCTEXT("SearchHint", "Search handshapes"))
                 .OnTextChanged(this, &SHandshapePickerWidget::onSearchTextChanged)
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+            [
+                SNew(SCheckBox)
+                .ToolTipText(LOCTEXT(
+                    "PickSelectedFingersTooltip",
+                    "After choosing a handshape, choose which fingers should keep their original animation."))
+                .OnCheckStateChanged(
+                    this,
+                    &SHandshapePickerWidget::onPickSelectedFingersChanged)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("PickSelectedFingers", "Pick Selected Fingers"))
+                ]
             ]
             + SVerticalBox::Slot()
             .FillHeight(1.0f)
@@ -204,15 +224,67 @@ FReply SHandshapePickerWidget::onCancelClicked()
 
 FReply SHandshapePickerWidget::onUseHandshapeClicked()
 {
+    if (!selectedCandidate.IsValid())
+    {
+        return FReply::Handled();
+    }
+    if (pickSelectedFingers)
+    {
+        openFingerSelectionWindow();
+        return FReply::Handled();
+    }
+    submitSelectedHandshape({});
+    return FReply::Handled();
+}
+
+void SHandshapePickerWidget::onPickSelectedFingersChanged(
+    const ECheckBoxState state)
+{
+    pickSelectedFingers = state == ECheckBoxState::Checked;
+}
+
+void SHandshapePickerWidget::openFingerSelectionWindow()
+{
+    const TSharedPtr<SWindow> pickerWindow = ownerWindow.Pin();
+    if (!pickerWindow.IsValid())
+    {
+        return;
+    }
+
+    const TSharedRef<SWindow> fingerWindow = SNew(SWindow)
+        .Title(LOCTEXT("SkipFingersTitle", "Skip Fingers"))
+        .ClientSize(FVector2D(390.0f, 300.0f))
+        .SupportsMaximize(false)
+        .SupportsMinimize(false);
+    const TSharedRef<SHandposeFingerSelectionWidget> fingerWidget =
+        SNew(SHandposeFingerSelectionWidget)
+        .OnSkippedFingersChosen(
+            this,
+            &SHandshapePickerWidget::onSkippedFingersChosen);
+    fingerWidget->setOwnerWindow(fingerWindow);
+    fingerWindow->SetContent(fingerWidget);
+    FSlateApplication::Get().AddWindowAsNativeChild(fingerWindow, pickerWindow.ToSharedRef());
+}
+
+void SHandshapePickerWidget::onSkippedFingersChosen(
+    const TArray<EHandposeFinger>& skippedFingers)
+{
+    submitSelectedHandshape(skippedFingers);
+}
+
+void SHandshapePickerWidget::submitSelectedHandshape(
+    const TArray<EHandposeFinger>& skippedFingers)
+{
     if (selectedCandidate.IsValid())
     {
-        onHandshapeChosen.ExecuteIfBound(segmentIndex, *selectedCandidate);
+        FHandshapeCandidate candidate = *selectedCandidate;
+        candidate.skippedFingers = skippedFingers;
+        onHandshapeChosen.ExecuteIfBound(segmentIndex, candidate);
     }
     if (const TSharedPtr<SWindow> window = ownerWindow.Pin())
     {
         window->RequestDestroyWindow();
     }
-    return FReply::Handled();
 }
 
 FText SHandshapePickerWidget::getSelectedNameText() const

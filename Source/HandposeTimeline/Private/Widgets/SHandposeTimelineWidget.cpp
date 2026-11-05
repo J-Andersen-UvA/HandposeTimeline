@@ -18,6 +18,7 @@
 #include "HandposeTimelineConfig.h"
 #include "IContentBrowserSingleton.h"
 #include "InputCoreTypes.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
 #include "Preview/HandposePreviewBuilder.h"
 #include "Framework/Application/SlateApplication.h"
@@ -25,8 +26,10 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SHandshapePickerWidget.h"
+#include "Widgets/SHandposeFingerSelectionWidget.h"
 #include "Widgets/SHandposeTimelineTrack.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -37,11 +40,49 @@ namespace
 {
 constexpr float minimumTimelineZoom = 1.0f;
 constexpr float maximumTimelineZoom = 5.0f;
+const TCHAR* configPersistenceSection = TEXT("HandposeTimeline");
+const TCHAR* configPersistenceKey = TEXT("LastConfigAsset");
 }
+
+class SHandposeTimelineVerticalScrollBox : public SScrollBox
+{
+public:
+    void setOnZoomWheel(TFunction<void(float)> callback)
+    {
+        onZoomWheel = MoveTemp(callback);
+    }
+
+    void setOnHorizontalWheel(TFunction<void(float)> callback)
+    {
+        onHorizontalWheel = MoveTemp(callback);
+    }
+
+    virtual FReply OnMouseWheel(
+        const FGeometry& myGeometry,
+        const FPointerEvent& mouseEvent) override
+    {
+        if (mouseEvent.IsControlDown() && onZoomWheel)
+        {
+            onZoomWheel(mouseEvent.GetWheelDelta());
+            return FReply::Handled();
+        }
+        if (mouseEvent.IsShiftDown() && onHorizontalWheel)
+        {
+            onHorizontalWheel(mouseEvent.GetWheelDelta());
+            return FReply::Handled();
+        }
+        return SScrollBox::OnMouseWheel(myGeometry, mouseEvent);
+    }
+
+private:
+    TFunction<void(float)> onZoomWheel;
+    TFunction<void(float)> onHorizontalWheel;
+};
 
 void SHandposeTimelineWidget::Construct(const FArguments& arguments)
 {
     playbackController = MakeShared<FHandposeTimelinePlaybackController>();
+    TSharedPtr<SHandposeTimelineVerticalScrollBox> verticalTimelineScrollBox;
 
     ChildSlot
     [
@@ -239,17 +280,60 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
         .FillHeight(1.0f)
         .Padding(8.0f)
         [
-            SAssignNew(timelineTrack, SHandposeTimelineTrack)
-            .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
-            .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
-            .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
-            .OnZoomWheel(this, &SHandposeTimelineWidget::onZoomWheel)
-            .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
-            .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
+            SAssignNew(horizontalTimelineScrollBox, SScrollBox)
+            .Orientation(Orient_Horizontal)
+            + SScrollBox::Slot()
+            [
+                SAssignNew(verticalTimelineScrollBox, SHandposeTimelineVerticalScrollBox)
+                .Orientation(Orient_Vertical)
+                + SScrollBox::Slot()
+                .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                [
+                    SAssignNew(rightTimelineTrack, SHandposeTimelineTrack)
+                    .HandSide(EHandposeSide::Right)
+                    .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
+                    .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
+                    .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+                    .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
+                    .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
+                    .OnAssignmentFingerEditRequested(
+                        this,
+                        &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                ]
+                + SScrollBox::Slot()
+                [
+                    SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
+                    .HandSide(EHandposeSide::Left)
+                    .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
+                    .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
+                    .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+                    .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
+                    .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
+                    .OnAssignmentFingerEditRequested(
+                        this,
+                        &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                ]
+            ]
         ]
     ];
 
+    verticalTimelineScrollBox->setOnZoomWheel(
+        [this](const float wheelDelta)
+        {
+            onZoomWheel(wheelDelta);
+        });
+    verticalTimelineScrollBox->setOnHorizontalWheel(
+        [this](const float wheelDelta)
+        {
+            if (horizontalTimelineScrollBox.IsValid())
+            {
+                horizontalTimelineScrollBox->SetScrollOffset(
+                    horizontalTimelineScrollBox->GetScrollOffset() - wheelDelta * 48.0f);
+            }
+        });
+
     refreshTimeline();
+    restoreLastConfig();
 }
 
 void SHandposeTimelineWidget::Tick(
@@ -409,8 +493,13 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
         return FReply::Handled();
     }
 
+    const TArray<FHandposeTimelineSegment>& selectedSegments =
+        getSegments(selectedHandSide);
+    const int32 selectedSegmentIndex = selectedHandSide == EHandposeSide::Left
+        ? selectedLeftSegmentIndex
+        : selectedRightSegmentIndex;
     if (playbackController->shouldLoopSegment() &&
-        !segments.IsValidIndex(selectedSegmentIndex))
+        !selectedSegments.IsValidIndex(selectedSegmentIndex))
     {
         statusText->SetText(LOCTEXT(
             "LoopSegmentRequiresSelection",
@@ -420,7 +509,7 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
 
     const EHandposeTimelinePlaybackResult result =
         playbackController->shouldLoopSegment()
-            ? playbackController->previewSegment(segments[selectedSegmentIndex])
+            ? playbackController->previewSegment(selectedSegments[selectedSegmentIndex])
             : playbackController->playTimeline();
     if (result == EHandposeTimelinePlaybackResult::MissingAnimationOrActor)
     {
@@ -470,7 +559,12 @@ bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
 {
     return Cast<UAnimSequence>(loadedAnimation.Get()) != nullptr &&
         loadedConfig.IsValid() &&
-        !assignments.IsEmpty();
+        hasAssignments();
+}
+
+bool SHandposeTimelineWidget::hasAssignments() const
+{
+    return !rightAssignments.IsEmpty() || !leftAssignments.IsEmpty();
 }
 
 bool SHandposeTimelineWidget::bakeCurrentAnimation(
@@ -491,7 +585,7 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
         errorMessage = TEXT("Load an animation and config before baking.");
         return false;
     }
-    if (assignments.IsEmpty())
+    if (!hasAssignments())
     {
         errorMessage = TEXT("Assign at least one handshape before baking.");
         return false;
@@ -517,27 +611,36 @@ UAnimSequenceBase* SHandposeTimelineWidget::getLoadedAnimation() const
     return loadedAnimation.Get();
 }
 
-void SHandposeTimelineWidget::onSegmentSelected(const int32 segmentIndex)
+void SHandposeTimelineWidget::onSegmentSelected(
+    const EHandposeSide handSide,
+    const int32 segmentIndex)
 {
-    selectSegment(segmentIndex, true);
-    openHandshapePicker(segmentIndex);
+    selectSegment(handSide, segmentIndex, true);
+    openHandshapePicker(handSide, segmentIndex);
 }
 
 void SHandposeTimelineWidget::onHandshapeChosen(
     const int32 segmentIndex,
     const FHandshapeCandidate& candidate)
 {
+    const EHandposeSide handSide = candidate.handSide;
+    TArray<FHandposeTimelineSegment>& segments = getSegments(handSide);
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    int32& selectedSegmentIndex = getSelectedSegmentIndex(handSide);
+    int32& selectedAssignmentIndex = getSelectedAssignmentIndex(handSide);
     if (!segments.IsValidIndex(segmentIndex) || !candidate.isValid())
     {
         return;
     }
 
     segments[segmentIndex].selectedHandshapeId = candidate.handshapeId;
+    selectedHandSide = handSide;
     selectedSegmentIndex = segmentIndex;
     selectedAssignmentIndex = assignments.IndexOfByPredicate(
         [segmentIndex](const FHandposeAssignment& assignment)
         {
-            return assignment.sourceSegmentIndex == segmentIndex;
+            return assignment.sourceSegmentIndex == segmentIndex ||
+                assignment.coveredSegmentIndices.Contains(segmentIndex);
         });
     if (selectedAssignmentIndex == INDEX_NONE)
     {
@@ -569,7 +672,10 @@ void SHandposeTimelineWidget::onHandshapeChosen(
     FHandposeAssignment& assignment = assignments[selectedAssignmentIndex];
     assignment.handshapeId = candidate.handshapeId;
     assignment.handshapeAnimation = candidate.handshapeAnimation;
-    linkOverlappingAssignments();
+    assignment.handSide = handSide;
+    assignment.skippedFingers = candidate.skippedFingers;
+    linkOverlappingAssignments(handSide);
+    updateAssignmentCoverage(handSide);
     statusText->SetText(FText::Format(
         LOCTEXT(
             "HandshapeAssigned",
@@ -580,13 +686,19 @@ void SHandposeTimelineWidget::onHandshapeChosen(
     refreshTimeline();
 }
 
-void SHandposeTimelineWidget::onAssignmentSelected(const int32 assignmentIndex)
+void SHandposeTimelineWidget::onAssignmentSelected(
+    const EHandposeSide handSide,
+    const int32 assignmentIndex)
 {
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    int32& selectedAssignmentIndex = getSelectedAssignmentIndex(handSide);
+    int32& selectedSegmentIndex = getSelectedSegmentIndex(handSide);
     if (!assignments.IsValidIndex(assignmentIndex))
     {
         return;
     }
     selectedAssignmentIndex = assignmentIndex;
+    selectedHandSide = handSide;
     selectedSegmentIndex = assignments[assignmentIndex].sourceSegmentIndex;
     const FHandposeAssignment& assignment = assignments[assignmentIndex];
     statusText->SetText(FText::Format(
@@ -598,19 +710,25 @@ void SHandposeTimelineWidget::onAssignmentSelected(const int32 assignmentIndex)
         FText::AsNumber(assignment.blendEndFrame),
         FText::AsNumber(assignment.fullPoseStartFrame),
         FText::AsNumber(assignment.fullPoseEndFrame)));
+    refreshTimeline();
 }
 
 void SHandposeTimelineWidget::onAssignmentChanged(
+    const EHandposeSide handSide,
     const int32 assignmentIndex,
     const FHandposeAssignment& assignment,
     const bool isFinal)
 {
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    int32& selectedAssignmentIndex = getSelectedAssignmentIndex(handSide);
     if (!assignments.IsValidIndex(assignmentIndex))
     {
         return;
     }
     assignments[assignmentIndex] = assignment;
+    assignments[assignmentIndex].handSide = handSide;
     selectedAssignmentIndex = assignmentIndex;
+    selectedHandSide = handSide;
     statusText->SetText(FText::Format(
         LOCTEXT(
             "AssignmentChanged",
@@ -622,14 +740,83 @@ void SHandposeTimelineWidget::onAssignmentChanged(
         FText::AsNumber(assignment.fullPoseEndFrame)));
     if (isFinal)
     {
-        linkOverlappingAssignments();
+        linkOverlappingAssignments(handSide);
+        updateAssignmentCoverage(handSide);
         rebuildPreviewAnimation(true);
         refreshTimeline();
     }
 }
 
+void SHandposeTimelineWidget::onAssignmentFingerEditRequested(
+    const EHandposeSide handSide,
+    const int32 assignmentIndex)
+{
+    const TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    if (!assignments.IsValidIndex(assignmentIndex))
+    {
+        return;
+    }
+
+    const FHandposeAssignment& assignment = assignments[assignmentIndex];
+    const TSharedRef<SWindow> fingerWindow = SNew(SWindow)
+        .Title(FText::Format(
+            LOCTEXT("EditSkippedFingersTitle", "Skip Fingers · {0}"),
+            FText::FromName(assignment.handshapeId)))
+        .ClientSize(FVector2D(390.0f, 300.0f))
+        .SupportsMaximize(false)
+        .SupportsMinimize(false);
+    const TSharedRef<SHandposeFingerSelectionWidget> fingerWidget =
+        SNew(SHandposeFingerSelectionWidget)
+        .InitialSkippedFingers(assignment.skippedFingers)
+        .OnSkippedFingersChosen(
+            this,
+            &SHandposeTimelineWidget::onAssignmentSkippedFingersChosen,
+            handSide,
+            assignmentIndex);
+    fingerWidget->setOwnerWindow(fingerWindow);
+    fingerWindow->SetContent(fingerWidget);
+
+    const TSharedPtr<SWindow> parentWindow =
+        FSlateApplication::Get().FindWidgetWindow(SharedThis(this));
+    if (parentWindow.IsValid())
+    {
+        FSlateApplication::Get().AddWindowAsNativeChild(
+            fingerWindow,
+            parentWindow.ToSharedRef());
+    }
+    else
+    {
+        FSlateApplication::Get().AddWindow(fingerWindow);
+    }
+}
+
+void SHandposeTimelineWidget::onAssignmentSkippedFingersChosen(
+    const TArray<EHandposeFinger>& skippedFingers,
+    const EHandposeSide handSide,
+    const int32 assignmentIndex)
+{
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    if (!assignments.IsValidIndex(assignmentIndex))
+    {
+        return;
+    }
+
+    assignments[assignmentIndex].skippedFingers = skippedFingers;
+    selectedHandSide = handSide;
+    getSelectedAssignmentIndex(handSide) = assignmentIndex;
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "AssignmentSkippedFingersChanged",
+            "Updated skipped fingers for {0}."),
+        FText::FromName(assignments[assignmentIndex].handshapeId)));
+    rebuildPreviewAnimation(true);
+    refreshTimeline();
+}
+
 void SHandposeTimelineWidget::removeSelectedAssignment()
 {
+    TArray<FHandposeAssignment>& assignments = getAssignments(selectedHandSide);
+    int32& selectedAssignmentIndex = getSelectedAssignmentIndex(selectedHandSide);
     if (!assignments.IsValidIndex(selectedAssignmentIndex))
     {
         return;
@@ -638,19 +825,7 @@ void SHandposeTimelineWidget::removeSelectedAssignment()
     const FHandposeAssignment removedAssignment = assignments[selectedAssignmentIndex];
     assignments.RemoveAt(selectedAssignmentIndex);
     selectedAssignmentIndex = INDEX_NONE;
-
-    if (segments.IsValidIndex(removedAssignment.sourceSegmentIndex))
-    {
-        const int32 replacementIndex = assignments.IndexOfByPredicate(
-            [&removedAssignment](const FHandposeAssignment& assignment)
-            {
-                return assignment.sourceSegmentIndex == removedAssignment.sourceSegmentIndex;
-            });
-        segments[removedAssignment.sourceSegmentIndex].selectedHandshapeId =
-            assignments.IsValidIndex(replacementIndex)
-                ? assignments[replacementIndex].handshapeId
-                : NAME_None;
-    }
+    updateAssignmentCoverage(selectedHandSide);
 
     statusText->SetText(FText::Format(
         LOCTEXT("AssignmentRemoved", "Removed assigned handshape {0}."),
@@ -706,10 +881,15 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     loadedAnimation = animation;
     previewAnimation.Reset();
     playbackController->setAnimation(animation);
-    segments.Reset();
-    assignments.Reset();
-    selectedSegmentIndex = INDEX_NONE;
-    selectedAssignmentIndex = INDEX_NONE;
+    rightSegments.Reset();
+    leftSegments.Reset();
+    rightAssignments.Reset();
+    leftAssignments.Reset();
+    selectedRightSegmentIndex = INDEX_NONE;
+    selectedLeftSegmentIndex = INDEX_NONE;
+    selectedRightAssignmentIndex = INDEX_NONE;
+    selectedLeftAssignmentIndex = INDEX_NONE;
+    selectedHandSide = EHandposeSide::Right;
 
     if (animation == nullptr)
     {
@@ -720,57 +900,82 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     }
 
     animationNameText->SetText(FText::FromString(animation->GetName()));
+    FString errorMessage;
+    if (!generateSegments(
+            *animation,
+            EHandposeSide::Right,
+            rightSegments,
+            errorMessage) ||
+        !generateSegments(
+            *animation,
+            EHandposeSide::Left,
+            leftSegments,
+            errorMessage))
+    {
+        statusText->SetText(FText::FromString(errorMessage));
+        refreshTimeline();
+        return;
+    }
+
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "SegmentationComplete",
+            "Generated {0} right-hand segments and {1} left-hand segments."),
+        FText::AsNumber(rightSegments.Num()),
+        FText::AsNumber(leftSegments.Num())));
+    refreshTimeline();
+}
+
+bool SHandposeTimelineWidget::generateSegments(
+    UAnimSequenceBase& animation,
+    const EHandposeSide handSide,
+    TArray<FHandposeTimelineSegment>& outputSegments,
+    FString& errorMessage) const
+{
     FHandshapeSegmentationSettings settings;
     if (const UHandposeTimelineConfig* config = loadedConfig.Get())
     {
-        settings = config->getSegmentationSettings();
+        settings = config->getSegmentationSettings(handSide);
     }
     else
     {
-        settings.boneNames = getSegmentationBoneNames(*animation);
+        settings.boneNames = getSegmentationBoneNames(animation, handSide);
     }
     if (settings.boneNames.IsEmpty())
     {
-        statusText->SetText(LOCTEXT(
-            "NoFingerBones",
-            "No finger bones were found. Expected bone names containing thumb, index, middle, ring, pinky, little, or finger."));
-        refreshTimeline();
-        return;
+        errorMessage = handSide == EHandposeSide::Left
+            ? TEXT("No left-hand finger bones were found.")
+            : TEXT("No right-hand finger bones were found.");
+        return false;
     }
 
     const FHandshapeSegmentationResult result =
         UHandshapeSegmentationBlueprintLibrary::segmentAnimation(
-            animation,
+            &animation,
             FAnimPoseEvaluationOptions(),
             settings);
     if (!result.success)
     {
-        statusText->SetText(FText::FromString(result.errorMessage));
-        refreshTimeline();
-        return;
+        errorMessage = result.errorMessage;
+        return false;
     }
 
-    segments.Reserve(result.segments.Num());
+    outputSegments.Reserve(result.segments.Num());
     for (const FHandshapeSegment& sourceSegment : result.segments)
     {
-        FHandposeTimelineSegment& segment = segments.AddDefaulted_GetRef();
+        FHandposeTimelineSegment& segment = outputSegments.AddDefaulted_GetRef();
         segment.startFrame = sourceSegment.startFrame;
         segment.endFrame = sourceSegment.endFrame;
         segment.durationSeconds = FMath::Max(
             0.0,
             sourceSegment.endTimeSeconds - sourceSegment.startTimeSeconds);
     }
-
-    statusText->SetText(FText::Format(
-        LOCTEXT("SegmentationComplete", "Generated {0} segments using {1} finger bones."),
-        FText::AsNumber(segments.Num()),
-        FText::AsNumber(settings.boneNames.Num())));
-    refreshTimeline();
+    return true;
 }
 
 void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
 {
-    loadedConfig = config;
+    loadedConfig.Reset(config);
     if (config == nullptr)
     {
         configNameText->SetText(LOCTEXT("InvalidConfig", "Invalid config"));
@@ -780,13 +985,15 @@ void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
         return;
     }
 
+    saveLastConfig(*config);
     configNameText->SetText(FText::FromString(config->GetName()));
     statusText->SetText(FText::Format(
         LOCTEXT(
             "ConfigLoaded",
-            "Loaded {0}: {1} segmentation bones, handshape folder {2}, and {3} available handshape entries."),
+            "Loaded {0}: {1} right-hand bones, {2} left-hand bones, handshape folder {3}, and {4} available handshape entries."),
         FText::FromString(config->GetName()),
-        FText::AsNumber(config->segmentationSettings.boneNames.Num()),
+        FText::AsNumber(config->rightHandBoneNames.Num()),
+        FText::AsNumber(config->leftHandBoneNames.Num()),
         FText::FromString(config->getHandshapeContentPath()),
         FText::AsNumber(
             config->getHandposeAssets().Num() + config->getHandshapePoses().Num())));
@@ -797,15 +1004,60 @@ void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
     }
 }
 
+void SHandposeTimelineWidget::restoreLastConfig()
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+
+    FString configAssetPath;
+    if (!GConfig->GetString(
+            configPersistenceSection,
+            configPersistenceKey,
+            configAssetPath,
+            GEditorPerProjectIni) ||
+        configAssetPath.IsEmpty())
+    {
+        return;
+    }
+
+    if (UHandposeTimelineConfig* config = Cast<UHandposeTimelineConfig>(
+            FSoftObjectPath(configAssetPath).TryLoad()))
+    {
+        loadConfig(config);
+    }
+}
+
+void SHandposeTimelineWidget::saveLastConfig(
+    const UHandposeTimelineConfig& config) const
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+
+    GConfig->SetString(
+        configPersistenceSection,
+        configPersistenceKey,
+        *config.GetPathName(),
+        GEditorPerProjectIni);
+    GConfig->Flush(false, GEditorPerProjectIni);
+}
+
 void SHandposeTimelineWidget::selectSegment(
+    const EHandposeSide handSide,
     const int32 segmentIndex,
     const bool shouldPreview)
 {
+    TArray<FHandposeTimelineSegment>& segments = getSegments(handSide);
+    int32& selectedSegmentIndex = getSelectedSegmentIndex(handSide);
     if (!segments.IsValidIndex(segmentIndex))
     {
         return;
     }
 
+    selectedHandSide = handSide;
     selectedSegmentIndex = segmentIndex;
     const FHandposeTimelineSegment& segment = segments[segmentIndex];
     statusText->SetText(FText::Format(
@@ -842,8 +1094,11 @@ void SHandposeTimelineWidget::selectSegment(
     }
 }
 
-void SHandposeTimelineWidget::openHandshapePicker(const int32 segmentIndex)
+void SHandposeTimelineWidget::openHandshapePicker(
+    const EHandposeSide handSide,
+    const int32 segmentIndex)
 {
+    const TArray<FHandposeTimelineSegment>& segments = getSegments(handSide);
     if (!segments.IsValidIndex(segmentIndex))
     {
         return;
@@ -856,6 +1111,7 @@ void SHandposeTimelineWidget::openHandshapePicker(const int32 segmentIndex)
 
     FString errorMessage;
     TArray<FHandshapeCandidate> candidates = getCandidatesForSegment(
+        handSide,
         segments[segmentIndex],
         errorMessage);
 
@@ -882,6 +1138,7 @@ void SHandposeTimelineWidget::openHandshapePicker(const int32 segmentIndex)
 }
 
 TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
+    const EHandposeSide handSide,
     const FHandposeTimelineSegment& segment,
     FString& errorMessage) const
 {
@@ -908,6 +1165,10 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
         {
             continue;
         }
+        if (handposeAsset->handSide != handSide)
+        {
+            continue;
+        }
 
         UAnimSequence* predictionHandpose = handposeAsset->predictionHandpose.LoadSynchronous();
         UAnimSequence* postProcessedHandpose =
@@ -922,6 +1183,10 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     }
     for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
     {
+        if (handSide != EHandposeSide::Right)
+        {
+            break;
+        }
         if (UAnimSequence* handshapeAnimation = handshapeReference.LoadSynchronous())
         {
             handshapeAnimations.AddUnique(handshapeAnimation);
@@ -940,7 +1205,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             segment.endFrame,
             handshapeAnimations,
             FAnimPoseEvaluationOptions(),
-            config->getSegmentationSettings(),
+            config->getSegmentationSettings(handSide),
             config->matchingMethod);
     if (!matchingResult.success)
     {
@@ -959,6 +1224,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.handshapeId = match.handshapeId;
             candidate.displayName = FText::FromName(match.handshapeId);
             candidate.handshapeAnimation = match.handshapeAnimation;
+            candidate.handSide = handSide;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
             continue;
         }
@@ -970,6 +1236,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.displayName = FText::FromString(handposeAsset->GetName());
             candidate.previewTexture = handposeAsset->thumbnail;
             candidate.handshapeAnimation = handposeAsset->postProcessedHandpose;
+            candidate.handSide = handSide;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
         }
     }
@@ -980,6 +1247,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
 void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
 {
     UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
+    const TArray<FHandposeAssignment> assignments = getAllAssignments();
     if (sourceAnimation == nullptr || assignments.IsEmpty())
     {
         previewAnimation.Reset();
@@ -988,13 +1256,17 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     }
 
     const float previousTime = preserveTime ? getCurrentTimeSeconds() : 0.0f;
-    TArray<FName> boneNames = loadedConfig.IsValid()
-        ? loadedConfig->getSegmentationSettings().boneNames
-        : getSegmentationBoneNames(*sourceAnimation);
+    const TArray<FName> rightBoneNames = loadedConfig.IsValid()
+        ? loadedConfig->getSegmentationSettings(EHandposeSide::Right).boneNames
+        : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Right);
+    const TArray<FName> leftBoneNames = loadedConfig.IsValid()
+        ? loadedConfig->getSegmentationSettings(EHandposeSide::Left).boneNames
+        : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Left);
     const FHandposePreviewBuildResult result = FHandposePreviewBuilder::build(
         sourceAnimation,
         assignments,
-        boneNames);
+        rightBoneNames,
+        leftBoneNames);
     if (!result.success || result.animation == nullptr)
     {
         statusText->SetText(FText::Format(
@@ -1014,8 +1286,9 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     }
 }
 
-void SHandposeTimelineWidget::linkOverlappingAssignments()
+void SHandposeTimelineWidget::linkOverlappingAssignments(const EHandposeSide handSide)
 {
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
     TArray<int32> sortedIndices;
     sortedIndices.Reserve(assignments.Num());
     for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
@@ -1023,7 +1296,7 @@ void SHandposeTimelineWidget::linkOverlappingAssignments()
         sortedIndices.Add(assignmentIndex);
     }
     sortedIndices.Sort(
-        [this](const int32 left, const int32 right)
+        [&assignments](const int32 left, const int32 right)
         {
             return assignments[left].blendStartFrame < assignments[right].blendStartFrame;
         });
@@ -1047,18 +1320,100 @@ void SHandposeTimelineWidget::linkOverlappingAssignments()
     }
 }
 
+void SHandposeTimelineWidget::updateAssignmentCoverage(
+    const EHandposeSide handSide)
+{
+    TArray<FHandposeTimelineSegment>& segments = getSegments(handSide);
+    TArray<FHandposeAssignment>& assignments = getAssignments(handSide);
+    for (FHandposeTimelineSegment& segment : segments)
+    {
+        segment.selectedHandshapeId = NAME_None;
+    }
+
+    for (FHandposeAssignment& assignment : assignments)
+    {
+        assignment.coveredSegmentIndices.Reset();
+        for (int32 segmentIndex = 0; segmentIndex < segments.Num(); ++segmentIndex)
+        {
+            FHandposeTimelineSegment& segment = segments[segmentIndex];
+            if (assignment.blendStartFrame <= segment.startFrame &&
+                assignment.blendEndFrame >= segment.endFrame)
+            {
+                assignment.coveredSegmentIndices.Add(segmentIndex);
+                segment.selectedHandshapeId = assignment.handshapeId;
+            }
+        }
+    }
+}
+
 void SHandposeTimelineWidget::refreshTimeline()
 {
-    if (timelineTrack.IsValid())
+    if (rightTimelineTrack.IsValid())
     {
-        timelineTrack->setTimeline(
+        rightTimelineTrack->setTimeline(
             loadedAnimation.Get(),
-            segments,
-            assignments,
-            selectedSegmentIndex,
-            selectedAssignmentIndex,
+            rightSegments,
+            rightAssignments,
+            selectedRightSegmentIndex,
+            selectedRightAssignmentIndex,
             timelineZoom);
     }
+    if (leftTimelineTrack.IsValid())
+    {
+        leftTimelineTrack->setTimeline(
+            loadedAnimation.Get(),
+            leftSegments,
+            leftAssignments,
+            selectedLeftSegmentIndex,
+            selectedLeftAssignmentIndex,
+            timelineZoom);
+    }
+}
+
+TArray<FHandposeTimelineSegment>& SHandposeTimelineWidget::getSegments(
+    const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left ? leftSegments : rightSegments;
+}
+
+const TArray<FHandposeTimelineSegment>& SHandposeTimelineWidget::getSegments(
+    const EHandposeSide handSide) const
+{
+    return handSide == EHandposeSide::Left ? leftSegments : rightSegments;
+}
+
+TArray<FHandposeAssignment>& SHandposeTimelineWidget::getAssignments(
+    const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left ? leftAssignments : rightAssignments;
+}
+
+const TArray<FHandposeAssignment>& SHandposeTimelineWidget::getAssignments(
+    const EHandposeSide handSide) const
+{
+    return handSide == EHandposeSide::Left ? leftAssignments : rightAssignments;
+}
+
+int32& SHandposeTimelineWidget::getSelectedSegmentIndex(const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left
+        ? selectedLeftSegmentIndex
+        : selectedRightSegmentIndex;
+}
+
+int32& SHandposeTimelineWidget::getSelectedAssignmentIndex(
+    const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left
+        ? selectedLeftAssignmentIndex
+        : selectedRightAssignmentIndex;
+}
+
+TArray<FHandposeAssignment> SHandposeTimelineWidget::getAllAssignments() const
+{
+    TArray<FHandposeAssignment> assignments = rightAssignments;
+    assignments.Append(leftAssignments);
+    return assignments;
 }
 
 float SHandposeTimelineWidget::getCurrentTimeSeconds() const
@@ -1105,7 +1460,8 @@ FText SHandposeTimelineWidget::getTimecodeText() const
 }
 
 TArray<FName> SHandposeTimelineWidget::getSegmentationBoneNames(
-    const UAnimSequenceBase& animation) const
+    const UAnimSequenceBase& animation,
+    const EHandposeSide handSide) const
 {
     TArray<FName> boneNames;
     const USkeleton* skeleton = animation.GetSkeleton();
@@ -1128,7 +1484,14 @@ TArray<FName> SHandposeTimelineWidget::getSegmentationBoneNames(
     for (const FMeshBoneInfo& boneInfo : referenceSkeleton.GetRawRefBoneInfo())
     {
         const FString lowercaseBoneName = boneInfo.Name.ToString().ToLower();
-        if (fingerNameParts.ContainsByPredicate(
+        const bool isRequestedSide = handSide == EHandposeSide::Left
+            ? lowercaseBoneName.Contains(TEXT("left")) ||
+                lowercaseBoneName.Contains(TEXT("_l_")) ||
+                lowercaseBoneName.StartsWith(TEXT("l_"))
+            : lowercaseBoneName.Contains(TEXT("right")) ||
+                lowercaseBoneName.Contains(TEXT("_r_")) ||
+                lowercaseBoneName.StartsWith(TEXT("r_"));
+        if (isRequestedSide && fingerNameParts.ContainsByPredicate(
             [&lowercaseBoneName](const FString& namePart)
             {
                 return lowercaseBoneName.Contains(namePart);

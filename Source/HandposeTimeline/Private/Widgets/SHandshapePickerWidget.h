@@ -1,5 +1,6 @@
 #pragma once
 
+#include "HandposeFinger.h"
 #include "HandposeTimelineSegment.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -40,6 +41,10 @@ private:
     void onSelectionChanged(FCandidateItem item, ESelectInfo::Type selectInfo);
     FReply onCancelClicked();
     FReply onUseHandshapeClicked();
+    void onPickSelectedFingersChanged(ECheckBoxState state);
+    void openFingerSelectionWindow();
+    void onSkippedFingersChosen(const TArray<EHandposeFinger>& skippedFingers);
+    void submitSelectedHandshape(const TArray<EHandposeFinger>& skippedFingers);
     FText getSelectedNameText() const;
     FText getSelectedRelevanceText() const;
     EVisibility getEmptyStateVisibility() const;
@@ -53,6 +58,7 @@ private:
     TArray<FCandidateItem> allCandidates;
     TArray<FCandidateItem> filteredCandidates;
     FCandidateItem selectedCandidate;
+    bool pickSelectedFingers = false;
     FOnHandshapeChosen onHandshapeChosen;
     TWeakPtr<SWindow> ownerWindow;
     TSharedPtr<FAssetThumbnailPool> thumbnailPool;

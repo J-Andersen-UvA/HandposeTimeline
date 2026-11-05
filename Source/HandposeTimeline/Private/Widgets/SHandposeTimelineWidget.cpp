@@ -7,6 +7,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "Baking/HandposeBakeService.h"
 #include "ContentBrowserModule.h"
+#include "DesktopPlatformModule.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
 #include "GameFramework/Actor.h"
@@ -15,10 +16,13 @@
 #include "HandshapeMatchingBlueprintLibrary.h"
 #include "HandshapeMatchingTypes.h"
 #include "HandposeAsset.h"
+#include "HandposeDecisionDataService.h"
 #include "HandposeTimelineConfig.h"
 #include "IContentBrowserSingleton.h"
+#include "IDesktopPlatform.h"
 #include "InputCoreTypes.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/Paths.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
 #include "Preview/HandposePreviewBuilder.h"
 #include "Framework/Application/SlateApplication.h"
@@ -42,6 +46,30 @@ constexpr float minimumTimelineZoom = 1.0f;
 constexpr float maximumTimelineZoom = 5.0f;
 const TCHAR* configPersistenceSection = TEXT("HandposeTimeline");
 const TCHAR* configPersistenceKey = TEXT("LastConfigAsset");
+
+FString handSideToString(const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left ? TEXT("Left") : TEXT("Right");
+}
+
+FString fingerToString(const EHandposeFinger finger)
+{
+    switch (finger)
+    {
+    case EHandposeFinger::Thumb:
+        return TEXT("Thumb");
+    case EHandposeFinger::Index:
+        return TEXT("Index");
+    case EHandposeFinger::Middle:
+        return TEXT("Middle");
+    case EHandposeFinger::Ring:
+        return TEXT("Ring");
+    case EHandposeFinger::Pinky:
+        return TEXT("Pinky");
+    default:
+        return TEXT("Unknown");
+    }
+}
 }
 
 class SHandposeTimelineVerticalScrollBox : public SScrollBox
@@ -130,6 +158,28 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                     "BakeTooltip",
                     "Bake the current handshape preview to the configured output folder."))
                 .OnClicked(this, &SHandposeTimelineWidget::onBakeClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("SaveDecisionData", "Save Decision Data"))
+                .ToolTipText(LOCTEXT(
+                    "SaveDecisionDataTooltip",
+                    "Capture the final timeline decisions and immediately write the Data Asset and JSON."))
+                .OnClicked(this, &SHandposeTimelineWidget::onSaveDecisionDataClicked)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("ImportDecisionData", "Import Decision Data"))
+                .ToolTipText(LOCTEXT(
+                    "ImportDecisionDataTooltip",
+                    "Import decision-data JSON and create or update its Data Asset."))
+                .OnClicked(this, &SHandposeTimelineWidget::onImportDecisionDataClicked)
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -555,6 +605,56 @@ FReply SHandposeTimelineWidget::onBakeClicked()
     return FReply::Handled();
 }
 
+FReply SHandposeTimelineWidget::onSaveDecisionDataClicked()
+{
+    const FHandposeDecisionDataResult result = captureDecisionData();
+    statusText->SetText(result.success
+        ? FText::Format(
+            LOCTEXT("DecisionDataSaved", "Saved decision data to {0} and {1}."),
+            FText::FromString(result.assetPath),
+            FText::FromString(result.jsonPath))
+        : FText::FromString(result.errorMessage));
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onImportDecisionDataClicked()
+{
+    IDesktopPlatform* desktopPlatform = FDesktopPlatformModule::Get();
+    if (desktopPlatform == nullptr)
+    {
+        statusText->SetText(LOCTEXT(
+            "DecisionDataImportUnavailable",
+            "The platform file dialog is unavailable."));
+        return FReply::Handled();
+    }
+
+    TArray<FString> selectedFiles;
+    const FString defaultPath = FPaths::Combine(
+        FPaths::ProjectSavedDir(),
+        TEXT("HandposeTimeline"),
+        TEXT("DecisionData"));
+    if (!desktopPlatform->OpenFileDialog(
+        FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr),
+        TEXT("Import HandposeTimeline Decision Data"),
+        defaultPath,
+        FString(),
+        TEXT("HandposeTimeline Decision Data (*.json)|*.json"),
+        EFileDialogFlags::None,
+        selectedFiles) || selectedFiles.IsEmpty())
+    {
+        return FReply::Handled();
+    }
+
+    const FHandposeDecisionDataResult result =
+        FHandposeDecisionDataService::importJson(selectedFiles[0]);
+    statusText->SetText(result.success
+        ? FText::Format(
+            LOCTEXT("DecisionDataImported", "Imported decision data to {0}."),
+            FText::FromString(result.assetPath))
+        : FText::FromString(result.errorMessage));
+    return FReply::Handled();
+}
+
 bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
 {
     return Cast<UAnimSequence>(loadedAnimation.Get()) != nullptr &&
@@ -603,6 +703,18 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
     outputPath = result.outputPath;
     errorMessage = result.errorMessage;
     cancelled = result.cancelled;
+    if (result.success)
+    {
+        const FHandposeDecisionDataResult decisionResult = captureDecisionData();
+        if (!decisionResult.success)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("HandposeTimeline could not capture decision data: %s"),
+                *decisionResult.errorMessage);
+        }
+    }
     return result.success;
 }
 
@@ -926,6 +1038,44 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     refreshTimeline();
 }
 
+void SHandposeTimelineWidget::resetSession()
+{
+    if (const TSharedPtr<SWindow> pickerWindow = handshapePickerWindow.Pin())
+    {
+        pickerWindow->RequestDestroyWindow();
+    }
+    handshapePickerWindow.Reset();
+
+    playbackController->pause();
+    playbackController->setActor(nullptr);
+    playbackController = MakeShared<FHandposeTimelinePlaybackController>();
+    loadedAnimation.Reset();
+    previewAnimation.Reset();
+    rightSegments.Reset();
+    leftSegments.Reset();
+    rightAssignments.Reset();
+    leftAssignments.Reset();
+    selectedRightSegmentIndex = INDEX_NONE;
+    selectedLeftSegmentIndex = INDEX_NONE;
+    selectedRightAssignmentIndex = INDEX_NONE;
+    selectedLeftAssignmentIndex = INDEX_NONE;
+    selectedHandSide = EHandposeSide::Right;
+    timelineZoom = minimumTimelineZoom;
+
+    if (horizontalTimelineScrollBox.IsValid())
+    {
+        horizontalTimelineScrollBox->SetScrollOffset(0.0f);
+    }
+    animationNameText->SetText(LOCTEXT("NoAnimationAfterReset", "No animation loaded"));
+    actorNameText->SetText(LOCTEXT("NoActorAfterReset", "No actor selected"));
+    statusText->SetText(LOCTEXT(
+        "SessionReset",
+        "Load an animation to generate segments."));
+    speedText->SetText(LOCTEXT("ResetPreviewSpeed", "Speed: 1x"));
+    zoomText->SetText(LOCTEXT("ResetZoom", "100%"));
+    refreshTimeline();
+}
+
 bool SHandposeTimelineWidget::generateSegments(
     UAnimSequenceBase& animation,
     const EHandposeSide handSide,
@@ -1225,6 +1375,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.displayName = FText::FromName(match.handshapeId);
             candidate.handshapeAnimation = match.handshapeAnimation;
             candidate.handSide = handSide;
+            candidate.matchingDistance = match.distance;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
             continue;
         }
@@ -1237,6 +1388,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.previewTexture = handposeAsset->thumbnail;
             candidate.handshapeAnimation = handposeAsset->postProcessedHandpose;
             candidate.handSide = handSide;
+            candidate.matchingDistance = match.distance;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
         }
     }
@@ -1414,6 +1566,127 @@ TArray<FHandposeAssignment> SHandposeTimelineWidget::getAllAssignments() const
     TArray<FHandposeAssignment> assignments = rightAssignments;
     assignments.Append(leftAssignments);
     return assignments;
+}
+
+FHandposeDecisionDataResult SHandposeTimelineWidget::captureDecisionData() const
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    const UHandposeTimelineConfig* config = loadedConfig.Get();
+    if (animation == nullptr || config == nullptr)
+    {
+        FHandposeDecisionDataResult result;
+        result.errorMessage = TEXT("Load an animation and config before saving decision data.");
+        return result;
+    }
+
+    FHandposeDecisionSessionData sessionData;
+    sessionData.capturedAtUtc = FDateTime::UtcNow().ToIso8601();
+    sessionData.sourceAnimationName = animation->GetName();
+    sessionData.sourceAnimationPath = animation->GetPathName();
+    sessionData.framesPerSecond = animation->GetSamplingFrameRate().AsDecimal();
+    sessionData.totalFrames = animation->GetNumberOfSampledKeys();
+    sessionData.durationSeconds = animation->GetPlayLength();
+    sessionData.config.configName = config->GetName();
+    sessionData.config.matchingMethod = StaticEnum<EHandshapeMatchingMethod>()->GetNameStringByValue(
+        static_cast<int64>(config->matchingMethod));
+    sessionData.config.minimumSegmentLength =
+        config->sharedSegmentationSettings.minimumSegmentLength;
+    sessionData.config.minimumAccelerationThreshold =
+        config->sharedSegmentationSettings.minimumAccelerationThreshold;
+    sessionData.config.quaternionSmoothingSigma =
+        config->sharedSegmentationSettings.quaternionSmoothingSigma;
+    sessionData.config.accelerationSmoothingSigma =
+        config->sharedSegmentationSettings.accelerationSmoothingSigma;
+    sessionData.config.thresholdFactor =
+        config->sharedSegmentationSettings.thresholdFactor;
+    for (const FName boneName : config->rightHandBoneNames)
+    {
+        sessionData.config.rightHandBoneNames.Add(boneName.ToString());
+    }
+    for (const FName boneName : config->leftHandBoneNames)
+    {
+        sessionData.config.leftHandBoneNames.Add(boneName.ToString());
+    }
+
+    const auto appendAssignments =
+        [&sessionData](
+            const EHandposeSide handSide,
+            const TArray<FHandposeAssignment>& assignments)
+        {
+            for (const FHandposeAssignment& assignment : assignments)
+            {
+                FHandposeDecisionAssignmentSnapshot& snapshot =
+                    sessionData.assignments.AddDefaulted_GetRef();
+                snapshot.assignmentId = assignment.assignmentId.ToString(
+                    EGuidFormats::DigitsWithHyphensLower);
+                snapshot.handSide = handSideToString(handSide);
+                snapshot.handposeId = assignment.handshapeId.ToString();
+                snapshot.sourceSegmentIndex = assignment.sourceSegmentIndex;
+                snapshot.coveredSegmentIndices = assignment.coveredSegmentIndices;
+                snapshot.blendStartFrame = assignment.blendStartFrame;
+                snapshot.fullPoseStartFrame = assignment.fullPoseStartFrame;
+                snapshot.fullPoseEndFrame = assignment.fullPoseEndFrame;
+                snapshot.blendEndFrame = assignment.blendEndFrame;
+                for (const EHandposeFinger finger : assignment.skippedFingers)
+                {
+                    snapshot.skippedFingers.Add(fingerToString(finger));
+                }
+            }
+        };
+    appendAssignments(EHandposeSide::Right, rightAssignments);
+    appendAssignments(EHandposeSide::Left, leftAssignments);
+
+    const auto appendSegments =
+        [this, &sessionData](
+            const EHandposeSide handSide,
+            const TArray<FHandposeTimelineSegment>& segments,
+            const TArray<FHandposeAssignment>& assignments)
+        {
+            for (int32 segmentIndex = 0; segmentIndex < segments.Num(); ++segmentIndex)
+            {
+                const FHandposeTimelineSegment& segment = segments[segmentIndex];
+                FHandposeDecisionSegmentSnapshot& snapshot =
+                    sessionData.segments.AddDefaulted_GetRef();
+                snapshot.handSide = handSideToString(handSide);
+                snapshot.segmentIndex = segmentIndex;
+                snapshot.startFrame = segment.startFrame;
+                snapshot.endFrame = segment.endFrame;
+                snapshot.durationSeconds = segment.durationSeconds;
+                for (const FHandposeAssignment& assignment : assignments)
+                {
+                    if (assignment.sourceSegmentIndex == segmentIndex ||
+                        assignment.coveredSegmentIndices.Contains(segmentIndex))
+                    {
+                        snapshot.assignmentIds.Add(assignment.assignmentId.ToString(
+                            EGuidFormats::DigitsWithHyphensLower));
+                    }
+                }
+                snapshot.hasAssignment = !snapshot.assignmentIds.IsEmpty();
+
+                FString candidateError;
+                const TArray<FHandshapeCandidate> candidates = getCandidatesForSegment(
+                    handSide,
+                    segment,
+                    candidateError);
+                const int32 candidateCount = FMath::Min(10, candidates.Num());
+                for (int32 candidateIndex = 0; candidateIndex < candidateCount; ++candidateIndex)
+                {
+                    const FHandshapeCandidate& candidate = candidates[candidateIndex];
+                    FHandposeDecisionCandidateSnapshot& candidateSnapshot =
+                        snapshot.topCandidates.AddDefaulted_GetRef();
+                    candidateSnapshot.handposeId = candidate.handshapeId.ToString();
+                    candidateSnapshot.displayName = candidate.displayName.ToString();
+                    candidateSnapshot.rank = candidateIndex + 1;
+                    candidateSnapshot.matchingDistance = candidate.matchingDistance;
+                    candidateSnapshot.relevanceScore = candidate.relevanceScore;
+                }
+            }
+        };
+
+    // Capture plain values so training data remains valid after Unreal assets move.
+    appendSegments(EHandposeSide::Right, rightSegments, rightAssignments);
+    appendSegments(EHandposeSide::Left, leftSegments, leftAssignments);
+    return FHandposeDecisionDataService::capture(sessionData);
 }
 
 float SHandposeTimelineWidget::getCurrentTimeSeconds() const

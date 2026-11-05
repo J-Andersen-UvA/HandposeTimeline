@@ -22,6 +22,11 @@
       "LoadingPhase": "Default"
     },
     {
+      "Name": "HandposeTimelineDecisionData",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    },
+    {
       "Name": "HandposeTimeline",
       "Type": "Editor",
       "LoadingPhase": "Default"

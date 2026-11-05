@@ -12,6 +12,7 @@ class IHandposeTimelineModule : public IModuleInterface
 {
 public:
     virtual bool openAnimation(UAnimSequenceBase* animation) = 0;
+    virtual void resetSession() = 0;
     virtual bool canBakeCurrentAnimation() const = 0;
     virtual bool hasAssignments() const = 0;
     virtual bool bakeCurrentAnimation(
@@ -28,6 +29,7 @@ public:
     virtual void StartupModule() override;
     virtual void ShutdownModule() override;
     virtual bool openAnimation(UAnimSequenceBase* animation) override;
+    virtual void resetSession() override;
     virtual bool canBakeCurrentAnimation() const override;
     virtual bool hasAssignments() const override;
     virtual bool bakeCurrentAnimation(

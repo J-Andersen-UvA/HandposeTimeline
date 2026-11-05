@@ -1,0 +1,3 @@
+#include "HandposeTimelineDecisionDataModule.h"
+
+IMPLEMENT_MODULE(FHandposeTimelineDecisionDataModule, HandposeTimelineDecisionData)

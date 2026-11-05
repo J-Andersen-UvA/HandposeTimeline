@@ -71,6 +71,14 @@ bool FHandposeTimelineModule::openAnimation(UAnimSequenceBase* animation)
     return true;
 }
 
+void FHandposeTimelineModule::resetSession()
+{
+    if (const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin())
+    {
+        widget->resetSession();
+    }
+}
+
 bool FHandposeTimelineModule::canBakeCurrentAnimation() const
 {
     const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();

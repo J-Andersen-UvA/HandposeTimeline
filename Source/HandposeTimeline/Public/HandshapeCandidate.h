@@ -35,6 +35,9 @@ struct HANDPOSETIMELINE_API FHandshapeCandidate
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     double relevanceScore = 0.0;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline", meta = (ClampMin = "0.0"))
+    double matchingDistance = 0.0;
+
     bool isValid() const;
     int32 getRelevancePercent() const;
     bool matchesSearch(const FString& searchText) const;

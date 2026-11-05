@@ -14,6 +14,7 @@ class SWindow;
 class UAnimSequence;
 class UAnimSequenceBase;
 class UHandposeTimelineConfig;
+struct FHandposeDecisionDataResult;
 
 class SHandposeTimelineWidget : public SCompoundWidget
 {
@@ -39,6 +40,7 @@ public:
         const FPointerEvent& mouseEvent) override;
     virtual bool SupportsKeyboardFocus() const override { return true; }
     void loadAnimation(UAnimSequenceBase* animation);
+    void resetSession();
     bool canBakeCurrentAnimation() const;
     bool hasAssignments() const;
     bool bakeCurrentAnimation(
@@ -57,6 +59,8 @@ private:
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
     FReply onBakeClicked();
+    FReply onSaveDecisionDataClicked();
+    FReply onImportDecisionDataClicked();
     void onSegmentSelected(EHandposeSide handSide, int32 segmentIndex);
     void onHandshapeChosen(
         int32 segmentIndex,
@@ -87,6 +91,7 @@ private:
     void rebuildPreviewAnimation(bool preserveTime);
     void linkOverlappingAssignments(EHandposeSide handSide);
     void updateAssignmentCoverage(EHandposeSide handSide);
+    FHandposeDecisionDataResult captureDecisionData() const;
     TArray<FHandshapeCandidate> getCandidatesForSegment(
         EHandposeSide handSide,
         const FHandposeTimelineSegment& segment,

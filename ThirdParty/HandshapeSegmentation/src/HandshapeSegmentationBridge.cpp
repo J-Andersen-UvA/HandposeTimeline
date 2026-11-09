@@ -1,7 +1,18 @@
 #include "HandshapeSegmentationBridge.h"
 
 #include "matching/poseshape.h"
+#include "matching/handshape.h"
 #include "math/math.h"
+
+HandSkeleton get_average_handskeleton_from_segment(
+    const std::vector<JointLocationTrack>& tracks,
+    const Segment& segment,
+    const json& bone_mapping,
+    bool take_middle_50_percent);
+std::vector<Match> match_Handskeletons(
+    const std::vector<HandSkeleton>& handskeletons,
+    const HandSkeleton& input_handskeleton,
+    MatchingMethod method);
 
 namespace
 {
@@ -49,6 +60,71 @@ MatchingMethod toUpstreamMatchingMethod(
     default:
         return MatchingMethod::Euclidean;
     }
+}
+
+const std::vector<std::string>& descriptorJointNames()
+{
+    static const std::vector<std::string> names = {
+        "thumb_metacarpal", "thumb_proximal", "thumb_distal", "thumb_tip",
+        "index_metacarpal", "index_proximal", "index_middle", "index_distal", "index_tip",
+        "middle_metacarpal", "middle_proximal", "middle_middle", "middle_distal", "middle_tip",
+        "ring_metacarpal", "ring_proximal", "ring_middle", "ring_distal", "ring_tip",
+        "pinky_metacarpal", "pinky_proximal", "pinky_middle", "pinky_distal", "pinky_tip"
+    };
+    return names;
+}
+
+json descriptorBoneMapping()
+{
+    return {
+        {"thumb", {
+            {"metacarpal", "thumb_metacarpal"},
+            {"proximal", "thumb_proximal"},
+            {"distal", "thumb_distal"},
+            {"tip", "thumb_tip"}}},
+        {"index", {
+            {"metacarpal", "index_metacarpal"},
+            {"proximal", "index_proximal"},
+            {"middle", "index_middle"},
+            {"distal", "index_distal"},
+            {"tip", "index_tip"}}},
+        {"middle", {
+            {"metacarpal", "middle_metacarpal"},
+            {"proximal", "middle_proximal"},
+            {"middle", "middle_middle"},
+            {"distal", "middle_distal"},
+            {"tip", "middle_tip"}}},
+        {"ring", {
+            {"metacarpal", "ring_metacarpal"},
+            {"proximal", "ring_proximal"},
+            {"middle", "ring_middle"},
+            {"distal", "ring_distal"},
+            {"tip", "ring_tip"}}},
+        {"pinky", {
+            {"metacarpal", "pinky_metacarpal"},
+            {"proximal", "pinky_proximal"},
+            {"middle", "pinky_middle"},
+            {"distal", "pinky_distal"},
+            {"tip", "pinky_tip"}}}
+    };
+}
+
+std::vector<JointLocationTrack> toUpstreamLocationTracks(
+    const handshapeSegmentationBridge::HandSkeletonTrack& source)
+{
+    const std::vector<std::string>& names = descriptorJointNames();
+    std::vector<JointLocationTrack> tracks(names.size());
+    for (size_t jointIndex = 0; jointIndex < names.size(); ++jointIndex)
+    {
+        tracks[jointIndex].name = names[jointIndex];
+        tracks[jointIndex].locations.reserve(source.frames.size());
+        for (const std::vector<handshapeSegmentationBridge::Position>& frame : source.frames)
+        {
+            const handshapeSegmentationBridge::Position& position = frame[jointIndex];
+            tracks[jointIndex].locations.emplace_back(position.x, position.y, position.z);
+        }
+    }
+    return tracks;
 }
 }
 
@@ -131,6 +207,62 @@ handshapeSegmentationBridge::matchPoses(
             upstreamHandshapes,
             toUpstreamPose(inputPose),
             toUpstreamMatchingMethod(method));
+
+    std::vector<handshapeSegmentationBridge::Match> matches;
+    matches.reserve(upstreamMatches.size());
+    for (const ::Match& match : upstreamMatches)
+    {
+        matches.push_back({match.handshape_id, match.distance});
+    }
+    return matches;
+}
+
+std::vector<handshapeSegmentationBridge::Match>
+handshapeSegmentationBridge::matchHandSkeletonTracks(
+    const std::vector<handshapeSegmentationBridge::HandSkeletonTrack>& handshapes,
+    const handshapeSegmentationBridge::HandSkeletonTrack& inputTrack,
+    const int inputStartFrame,
+    const int inputEndFrame,
+    const handshapeSegmentationBridge::MatchingMethod method,
+    handshapeSegmentationBridge::HandSkeletonMatchDiagnostics* diagnostics)
+{
+    const json boneMapping = descriptorBoneMapping();
+    std::vector<::HandSkeleton> upstreamHandshapes;
+    upstreamHandshapes.reserve(handshapes.size());
+    for (const handshapeSegmentationBridge::HandSkeletonTrack& handshape : handshapes)
+    {
+        const std::vector<JointLocationTrack> tracks =
+            toUpstreamLocationTracks(handshape);
+        upstreamHandshapes.push_back(get_average_handskeleton_from_segment(
+            tracks,
+            {0, static_cast<int>(handshape.frames.size()) - 1},
+            boneMapping,
+            false));
+    }
+
+    const std::vector<JointLocationTrack> inputTracks =
+        toUpstreamLocationTracks(inputTrack);
+    const ::HandSkeleton inputSkeleton = get_average_handskeleton_from_segment(
+        inputTracks,
+        {inputStartFrame, inputEndFrame},
+        boneMapping,
+        true);
+    if (diagnostics != nullptr)
+    {
+        diagnostics->inputDescriptor =
+            handshape::Handshape::compute_handshape_representation(inputSkeleton);
+        diagnostics->handshapeDescriptors.clear();
+        diagnostics->handshapeDescriptors.reserve(upstreamHandshapes.size());
+        for (const ::HandSkeleton& handshape : upstreamHandshapes)
+        {
+            diagnostics->handshapeDescriptors.push_back(
+                handshape::Handshape::compute_handshape_representation(handshape));
+        }
+    }
+    const std::vector<::Match> upstreamMatches = match_Handskeletons(
+        upstreamHandshapes,
+        inputSkeleton,
+        toUpstreamMatchingMethod(method));
 
     std::vector<handshapeSegmentationBridge::Match> matches;
     matches.reserve(upstreamMatches.size());

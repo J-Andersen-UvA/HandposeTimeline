@@ -25,6 +25,7 @@ add_library(HandshapeSegmentationUpstream STATIC
   src/HandshapeSegmentationBridge.cpp
   ${HANDSHAPE_SEGMENTATION_ROOT}/src/anim/anim.cpp
   ${HANDSHAPE_SEGMENTATION_ROOT}/src/math/math.cpp
+  ${HANDSHAPE_SEGMENTATION_ROOT}/src/matching/handshape.cpp
   ${HANDSHAPE_SEGMENTATION_ROOT}/src/matching/poseshape.cpp
   ${HANDSHAPE_SEGMENTATION_ROOT}/src/segmentation.cpp
   ${ufbx_SOURCE_DIR}/ufbx.c)

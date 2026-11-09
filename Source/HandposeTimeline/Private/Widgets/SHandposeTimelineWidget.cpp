@@ -40,6 +40,8 @@
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineWidget"
 
+DEFINE_LOG_CATEGORY_STATIC(LogHandposeTimelineRecommendations, Log, All);
+
 namespace
 {
 constexpr float minimumTimelineZoom = 1.0f;
@@ -69,6 +71,17 @@ FString fingerToString(const EHandposeFinger finger)
     default:
         return TEXT("Unknown");
     }
+}
+
+FString descriptorToString(const TArray<double>& descriptor)
+{
+    TArray<FString> values;
+    values.Reserve(descriptor.Num());
+    for (const double value : descriptor)
+    {
+        values.Add(FString::Printf(TEXT("%.12f"), value));
+    }
+    return FString::Join(values, TEXT(","));
 }
 }
 
@@ -1356,11 +1369,100 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             handshapeAnimations,
             FAnimPoseEvaluationOptions(),
             config->getSegmentationSettings(handSide),
-            config->matchingMethod);
+            config->matchingMethod,
+            config->descriptorMethod,
+            config->getBoneMapping(handSide),
+            config->useVirtualLeafBones,
+            config->virtualLeafBoneExtensionCm);
     if (!matchingResult.success)
     {
         errorMessage = matchingResult.errorMessage;
         return candidates;
+    }
+
+    const FString descriptorMethod =
+        StaticEnum<EHandshapeDescriptorMethod>()->GetNameStringByValue(
+            static_cast<int64>(config->descriptorMethod));
+    const FString matchingMethod =
+        StaticEnum<EHandshapeMatchingMethod>()->GetNameStringByValue(
+            static_cast<int64>(config->matchingMethod));
+    UE_LOG(
+        LogHandposeTimelineRecommendations,
+        Display,
+        TEXT("Recommendation input: animation=%s hand=%s frames=%d-%d fps=%.6f totalFrames=%d descriptor=%s distance=%s candidates=%d virtualTips=%s extensionCm=%.3f"),
+        *animation->GetPathName(),
+        *handSideToString(handSide),
+        segment.startFrame,
+        segment.endFrame,
+        animation->GetSamplingFrameRate().AsDecimal(),
+        animation->GetNumberOfSampledKeys(),
+        *descriptorMethod,
+        *matchingMethod,
+        matchingResult.matches.Num(),
+        config->useVirtualLeafBones ? TEXT("true") : TEXT("false"),
+        config->virtualLeafBoneExtensionCm);
+    if (config->descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton)
+    {
+        const FHandshapeBoneMapping& mapping = config->getBoneMapping(handSide);
+        UE_LOG(
+            LogHandposeTimelineRecommendations,
+            Display,
+            TEXT("Recommendation bones: thumb=(%s,%s,%s,%s) index=(%s,%s,%s,%s,%s) middle=(%s,%s,%s,%s,%s) ring=(%s,%s,%s,%s,%s) pinky=(%s,%s,%s,%s,%s)"),
+            *mapping.thumb.metacarpal.ToString(),
+            *mapping.thumb.proximal.ToString(),
+            *mapping.thumb.distal.ToString(),
+            *mapping.thumb.tip.ToString(),
+            *mapping.index.metacarpal.ToString(),
+            *mapping.index.proximal.ToString(),
+            *mapping.index.middle.ToString(),
+            *mapping.index.distal.ToString(),
+            *mapping.index.tip.ToString(),
+            *mapping.middle.metacarpal.ToString(),
+            *mapping.middle.proximal.ToString(),
+            *mapping.middle.middle.ToString(),
+            *mapping.middle.distal.ToString(),
+            *mapping.middle.tip.ToString(),
+            *mapping.ring.metacarpal.ToString(),
+            *mapping.ring.proximal.ToString(),
+            *mapping.ring.middle.ToString(),
+            *mapping.ring.distal.ToString(),
+            *mapping.ring.tip.ToString(),
+            *mapping.pinky.metacarpal.ToString(),
+            *mapping.pinky.proximal.ToString(),
+            *mapping.pinky.middle.ToString(),
+            *mapping.pinky.distal.ToString(),
+            *mapping.pinky.tip.ToString());
+        UE_LOG(
+            LogHandposeTimelineRecommendations,
+            Display,
+            TEXT("Recommendation inputDescriptor=[%s]"),
+            *descriptorToString(matchingResult.inputDescriptor));
+    }
+    const int32 loggedMatchCount = FMath::Min(10, matchingResult.matches.Num());
+    for (int32 matchIndex = 0; matchIndex < loggedMatchCount; ++matchIndex)
+    {
+        const FHandshapeMatch& match = matchingResult.matches[matchIndex];
+        const UAnimSequenceBase* candidateAnimation = match.handshapeAnimation;
+        UE_LOG(
+            LogHandposeTimelineRecommendations,
+            Display,
+            TEXT("Recommendation rank=%d handshape=%s distance=%.12f asset=%s frames=%d fps=%.6f duration=%.6f"),
+            matchIndex + 1,
+            *match.handshapeId.ToString(),
+            match.distance,
+            candidateAnimation != nullptr ? *candidateAnimation->GetPathName() : TEXT("None"),
+            candidateAnimation != nullptr ? candidateAnimation->GetNumberOfSampledKeys() : 0,
+            candidateAnimation != nullptr ? candidateAnimation->GetSamplingFrameRate().AsDecimal() : 0.0,
+            candidateAnimation != nullptr ? candidateAnimation->GetPlayLength() : 0.0);
+        if (!match.descriptor.IsEmpty())
+        {
+            UE_LOG(
+                LogHandposeTimelineRecommendations,
+                Display,
+                TEXT("Recommendation rank=%d descriptor=[%s]"),
+                matchIndex + 1,
+                *descriptorToString(match.descriptor));
+        }
     }
 
     candidates.Reserve(matchingResult.matches.Num());
@@ -1409,10 +1511,10 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
 
     const float previousTime = preserveTime ? getCurrentTimeSeconds() : 0.0f;
     const TArray<FName> rightBoneNames = loadedConfig.IsValid()
-        ? loadedConfig->getSegmentationSettings(EHandposeSide::Right).boneNames
+        ? loadedConfig->getApplyBoneNames(EHandposeSide::Right)
         : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Right);
     const TArray<FName> leftBoneNames = loadedConfig.IsValid()
-        ? loadedConfig->getSegmentationSettings(EHandposeSide::Left).boneNames
+        ? loadedConfig->getApplyBoneNames(EHandposeSide::Left)
         : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Left);
     const FHandposePreviewBuildResult result = FHandposePreviewBuilder::build(
         sourceAnimation,
@@ -1589,6 +1691,11 @@ FHandposeDecisionDataResult SHandposeTimelineWidget::captureDecisionData() const
     sessionData.config.configName = config->GetName();
     sessionData.config.matchingMethod = StaticEnum<EHandshapeMatchingMethod>()->GetNameStringByValue(
         static_cast<int64>(config->matchingMethod));
+    sessionData.config.descriptorMethod = StaticEnum<EHandshapeDescriptorMethod>()->GetNameStringByValue(
+        static_cast<int64>(config->descriptorMethod));
+    sessionData.config.useVirtualLeafBones = config->useVirtualLeafBones;
+    sessionData.config.virtualLeafBoneExtensionCm =
+        config->virtualLeafBoneExtensionCm;
     sessionData.config.minimumSegmentLength =
         config->sharedSegmentationSettings.minimumSegmentLength;
     sessionData.config.minimumAccelerationThreshold =
@@ -1606,6 +1713,14 @@ FHandposeDecisionDataResult SHandposeTimelineWidget::captureDecisionData() const
     for (const FName boneName : config->leftHandBoneNames)
     {
         sessionData.config.leftHandBoneNames.Add(boneName.ToString());
+    }
+    for (const FName boneName : config->getLeafBoneNames(EHandposeSide::Right))
+    {
+        sessionData.config.rightHandLeafBoneNames.Add(boneName.ToString());
+    }
+    for (const FName boneName : config->getLeafBoneNames(EHandposeSide::Left))
+    {
+        sessionData.config.leftHandLeafBoneNames.Add(boneName.ToString());
     }
 
     const auto appendAssignments =

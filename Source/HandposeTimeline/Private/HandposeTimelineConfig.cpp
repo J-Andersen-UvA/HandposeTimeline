@@ -6,37 +6,124 @@
 #include "HandposeAsset.h"
 #include "Modules/ModuleManager.h"
 
+namespace
+{
+FName toLeftBoneName(const FName rightBoneName)
+{
+    FString leftBoneName = rightBoneName.ToString();
+    leftBoneName.ReplaceInline(TEXT("Right"), TEXT("Left"));
+    leftBoneName.ReplaceInline(TEXT("_r"), TEXT("_l"));
+    return FName(leftBoneName);
+}
+
+FHandshapeBoneMapping makeDefaultRightBoneMapping()
+{
+    FHandshapeBoneMapping mapping;
+    mapping.thumb = {
+        TEXT("RightHandThumb1"), TEXT("RightHandThumb2"),
+        TEXT("RightHandThumb3"), TEXT("RightHandThumb4")};
+    mapping.index = {
+        TEXT("RightHandIndex"), TEXT("RightHandIndex1"),
+        TEXT("RightHandIndex2"), TEXT("RightHandIndex3"),
+        TEXT("RightHandIndex4")};
+    mapping.middle = {
+        TEXT("RightHand"), TEXT("RightHandMiddle1"),
+        TEXT("RightHandMiddle2"), TEXT("RightHandMiddle3"),
+        TEXT("RightHandMiddle4")};
+    mapping.ring = {
+        TEXT("RightHandRing"), TEXT("RightHandRing1"),
+        TEXT("RightHandRing2"), TEXT("RightHandRing3"),
+        TEXT("RightHandRing4")};
+    mapping.pinky = {
+        TEXT("RightHandPinky"), TEXT("RightHandPinky1"),
+        TEXT("RightHandPinky2"), TEXT("RightHandPinky3"),
+        TEXT("RightHandPinky4")};
+    return mapping;
+}
+
+FHandshapeBoneMapping makeLeftBoneMapping(const FHandshapeBoneMapping& right)
+{
+    FHandshapeBoneMapping left = right;
+    left.thumb.metacarpal = toLeftBoneName(right.thumb.metacarpal);
+    left.thumb.proximal = toLeftBoneName(right.thumb.proximal);
+    left.thumb.distal = toLeftBoneName(right.thumb.distal);
+    left.thumb.tip = toLeftBoneName(right.thumb.tip);
+    FHandshapeFingerBoneMapping* leftFingers[] = {
+        &left.index, &left.middle, &left.ring, &left.pinky};
+    const FHandshapeFingerBoneMapping* rightFingers[] = {
+        &right.index, &right.middle, &right.ring, &right.pinky};
+    for (int32 fingerIndex = 0; fingerIndex < 4; ++fingerIndex)
+    {
+        leftFingers[fingerIndex]->metacarpal =
+            toLeftBoneName(rightFingers[fingerIndex]->metacarpal);
+        leftFingers[fingerIndex]->proximal =
+            toLeftBoneName(rightFingers[fingerIndex]->proximal);
+        leftFingers[fingerIndex]->middle =
+            toLeftBoneName(rightFingers[fingerIndex]->middle);
+        leftFingers[fingerIndex]->distal =
+            toLeftBoneName(rightFingers[fingerIndex]->distal);
+        leftFingers[fingerIndex]->tip =
+            toLeftBoneName(rightFingers[fingerIndex]->tip);
+    }
+    return left;
+}
+
+TArray<FName> getMappedBones(
+    const FHandshapeBoneMapping& mapping,
+    const bool includeTips)
+{
+    TArray<FName> bones = {
+        mapping.thumb.metacarpal,
+        mapping.thumb.proximal,
+        mapping.thumb.distal,
+        mapping.index.metacarpal,
+        mapping.index.proximal,
+        mapping.index.middle,
+        mapping.index.distal,
+        mapping.middle.metacarpal,
+        mapping.middle.proximal,
+        mapping.middle.middle,
+        mapping.middle.distal,
+        mapping.ring.metacarpal,
+        mapping.ring.proximal,
+        mapping.ring.middle,
+        mapping.ring.distal,
+        mapping.pinky.metacarpal,
+        mapping.pinky.proximal,
+        mapping.pinky.middle,
+        mapping.pinky.distal
+    };
+    if (includeTips)
+    {
+        bones.Insert(mapping.thumb.tip, 3);
+        bones.Insert(mapping.index.tip, 8);
+        bones.Insert(mapping.middle.tip, 13);
+        bones.Insert(mapping.ring.tip, 18);
+        bones.Add(mapping.pinky.tip);
+    }
+    bones.RemoveAll([](const FName boneName) { return boneName.IsNone(); });
+    return bones;
+}
+
+TArray<FName> getMappedTips(const FHandshapeBoneMapping& mapping)
+{
+    return {
+        mapping.thumb.tip,
+        mapping.index.tip,
+        mapping.middle.tip,
+        mapping.ring.tip,
+        mapping.pinky.tip
+    };
+}
+
+}
+
 UHandposeTimelineConfig::UHandposeTimelineConfig()
 {
-    rightHandBoneNames = {
-        TEXT("RightHandIndex"),
-        TEXT("RightHandIndex1"),
-        TEXT("RightHandIndex2"),
-        TEXT("RightHandIndex3"),
-        TEXT("RightHandThumb"),
-        TEXT("RightHandThumb1"),
-        TEXT("RightHandThumb2"),
-        TEXT("RightHandThumb3"),
-        TEXT("RightHandMiddle"),
-        TEXT("RightHandMiddle1"),
-        TEXT("RightHandMiddle2"),
-        TEXT("RightHandMiddle3"),
-        TEXT("RightHandPinky"),
-        TEXT("RightHandPinky1"),
-        TEXT("RightHandPinky2"),
-        TEXT("RightHandPinky3"),
-        TEXT("RightHandRing"),
-        TEXT("RightHandRing1"),
-        TEXT("RightHandRing2"),
-        TEXT("RightHandRing3")
-    };
-    leftHandBoneNames = rightHandBoneNames;
-    for (FName& boneName : leftHandBoneNames)
-    {
-        FString leftBoneName = boneName.ToString();
-        leftBoneName.ReplaceInline(TEXT("Right"), TEXT("Left"));
-        boneName = FName(leftBoneName);
-    }
+    rightHandBoneMapping = makeDefaultRightBoneMapping();
+    leftHandBoneMapping = makeLeftBoneMapping(rightHandBoneMapping);
+    rightHandBoneNames = getMappedBones(rightHandBoneMapping, false);
+    leftHandBoneNames = getMappedBones(leftHandBoneMapping, false);
     handshapeContentFolder.Path = TEXT("/HandposeTimeline/HandposeTimeline/Handposes");
     bakedAnimationOutputFolder.Path = TEXT("/Game/HandposeTimeline/Baked");
 }
@@ -44,36 +131,25 @@ UHandposeTimelineConfig::UHandposeTimelineConfig()
 void UHandposeTimelineConfig::PostLoad()
 {
     Super::PostLoad();
-    if (segmentationSettings_DEPRECATED.boneNames.IsEmpty())
+    if (!segmentationSettings_DEPRECATED.boneNames.IsEmpty())
     {
-        return;
+        rightHandBoneNames = segmentationSettings_DEPRECATED.boneNames;
+        leftHandBoneNames =
+            leftHandSegmentationSettings_DEPRECATED.boneNames;
+        sharedSegmentationSettings.minimumSegmentLength =
+            segmentationSettings_DEPRECATED.minimumSegmentLength;
+        sharedSegmentationSettings.minimumAccelerationThreshold =
+            segmentationSettings_DEPRECATED.minimumAccelerationThreshold;
+        sharedSegmentationSettings.quaternionSmoothingSigma =
+            segmentationSettings_DEPRECATED.quaternionSmoothingSigma;
+        sharedSegmentationSettings.accelerationSmoothingSigma =
+            segmentationSettings_DEPRECATED.accelerationSmoothingSigma;
+        sharedSegmentationSettings.thresholdFactor =
+            segmentationSettings_DEPRECATED.thresholdFactor;
+        segmentationSettings_DEPRECATED.boneNames.Reset();
+        leftHandSegmentationSettings_DEPRECATED.boneNames.Reset();
+        MarkPackageDirty();
     }
-
-    rightHandBoneNames = segmentationSettings_DEPRECATED.boneNames;
-    leftHandBoneNames = leftHandSegmentationSettings_DEPRECATED.boneNames;
-    if (leftHandBoneNames.IsEmpty())
-    {
-        leftHandBoneNames = rightHandBoneNames;
-        for (FName& boneName : leftHandBoneNames)
-        {
-            FString leftBoneName = boneName.ToString();
-            leftBoneName.ReplaceInline(TEXT("Right"), TEXT("Left"));
-            boneName = FName(leftBoneName);
-        }
-    }
-    sharedSegmentationSettings.minimumSegmentLength =
-        segmentationSettings_DEPRECATED.minimumSegmentLength;
-    sharedSegmentationSettings.minimumAccelerationThreshold =
-        segmentationSettings_DEPRECATED.minimumAccelerationThreshold;
-    sharedSegmentationSettings.quaternionSmoothingSigma =
-        segmentationSettings_DEPRECATED.quaternionSmoothingSigma;
-    sharedSegmentationSettings.accelerationSmoothingSigma =
-        segmentationSettings_DEPRECATED.accelerationSmoothingSigma;
-    sharedSegmentationSettings.thresholdFactor =
-        segmentationSettings_DEPRECATED.thresholdFactor;
-    segmentationSettings_DEPRECATED.boneNames.Reset();
-    leftHandSegmentationSettings_DEPRECATED.boneNames.Reset();
-    MarkPackageDirty();
 }
 
 FHandshapeSegmentationSettings UHandposeTimelineConfig::getSegmentationSettings() const
@@ -97,6 +173,41 @@ FHandshapeSegmentationSettings UHandposeTimelineConfig::getSegmentationSettings(
         sharedSegmentationSettings.accelerationSmoothingSigma;
     settings.thresholdFactor = sharedSegmentationSettings.thresholdFactor;
     return settings;
+}
+
+const FHandshapeBoneMapping& UHandposeTimelineConfig::getBoneMapping(
+    const EHandposeSide handSide) const
+{
+    return handSide == EHandposeSide::Left
+        ? leftHandBoneMapping
+        : rightHandBoneMapping;
+}
+
+TArray<FName> UHandposeTimelineConfig::getConfiguredBoneNames(
+    const EHandposeSide handSide) const
+{
+    return getMappedBones(getBoneMapping(handSide), false);
+}
+
+TArray<FName> UHandposeTimelineConfig::getApplyBoneNames(
+    const EHandposeSide handSide) const
+{
+    const TArray<FName>& applyBoneNames = handSide == EHandposeSide::Left
+        ? leftHandApplyBoneNames
+        : rightHandApplyBoneNames;
+    if (!applyBoneNames.IsEmpty())
+    {
+        return applyBoneNames;
+    }
+    return handSide == EHandposeSide::Left
+        ? leftHandBoneNames
+        : rightHandBoneNames;
+}
+
+TArray<FName> UHandposeTimelineConfig::getLeafBoneNames(
+    const EHandposeSide handSide) const
+{
+    return getMappedTips(getBoneMapping(handSide));
 }
 
 FString UHandposeTimelineConfig::getHandshapeContentPath() const

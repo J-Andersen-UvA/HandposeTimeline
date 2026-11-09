@@ -52,6 +52,26 @@ public:
     UPROPERTY(
         EditAnywhere,
         BlueprintReadOnly,
+        Category = "Handshapes|Bone Mapping",
+        meta = (EditCondition = "descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton", EditConditionHides))
+    FHandshapeBoneMapping rightHandBoneMapping;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Handshapes|Bone Mapping",
+        meta = (EditCondition = "descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton", EditConditionHides))
+    FHandshapeBoneMapping leftHandBoneMapping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes|Apply Bones")
+    TArray<FName> rightHandApplyBoneNames;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes|Apply Bones")
+    TArray<FName> leftHandApplyBoneNames;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
         Category = "Handshapes",
         meta = (ContentDir, LongPackageName))
     FDirectoryPath handshapeContentFolder;
@@ -61,6 +81,34 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
     EHandshapeMatchingMethod matchingMethod = EHandshapeMatchingMethod::Euclidean;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
+    EHandshapeDescriptorMethod descriptorMethod = EHandshapeDescriptorMethod::JointRotations;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Handshapes|Descriptor Bones",
+        meta = (
+            DisplayName = "Use Virtual Leaf Bones",
+            EditCondition = "descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton",
+            EditConditionHides))
+    bool useVirtualLeafBones = false;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadOnly,
+        Category = "Handshapes|Descriptor Bones",
+        meta = (
+            DisplayName = "Virtual Leaf Bone Extension (cm)",
+            ClampMin = "1.0",
+            ClampMax = "3.0",
+            UIMin = "1.0",
+            UIMax = "3.0",
+            Units = "cm",
+            EditCondition = "descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton && useVirtualLeafBones",
+            EditConditionHides))
+    double virtualLeafBoneExtensionCm = 2.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes")
     TArray<TSoftObjectPtr<UAnimSequence>> handshapePoses;
@@ -83,6 +131,10 @@ public:
 
     FHandshapeSegmentationSettings getSegmentationSettings() const;
     FHandshapeSegmentationSettings getSegmentationSettings(EHandposeSide handSide) const;
+    const FHandshapeBoneMapping& getBoneMapping(EHandposeSide handSide) const;
+    TArray<FName> getConfiguredBoneNames(EHandposeSide handSide) const;
+    TArray<FName> getApplyBoneNames(EHandposeSide handSide) const;
+    TArray<FName> getLeafBoneNames(EHandposeSide handSide) const;
     FString getHandshapeContentPath() const;
     TArray<TSoftObjectPtr<UAnimSequence>> getHandshapePoses() const;
     TArray<TSoftObjectPtr<UHandposeAsset>> getHandposeAssets() const;
@@ -94,6 +146,12 @@ private:
 
     UPROPERTY()
     FHandshapeSegmentationSettings leftHandSegmentationSettings_DEPRECATED;
+
+    UPROPERTY()
+    TArray<FName> rightHandLeafBoneNames_DEPRECATED;
+
+    UPROPERTY()
+    TArray<FName> leftHandLeafBoneNames_DEPRECATED;
 
     TArray<TSoftObjectPtr<UAnimSequence>> findHandshapesInContentFolder() const;
     TArray<TSoftObjectPtr<UHandposeAsset>> findHandposeAssetsInContentFolder() const;

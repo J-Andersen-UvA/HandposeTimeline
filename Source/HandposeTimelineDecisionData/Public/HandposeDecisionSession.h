@@ -103,6 +103,15 @@ struct HANDPOSETIMELINEDECISIONDATA_API FHandposeDecisionConfigSnapshot
     FString matchingMethod;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
+    FString descriptorMethod;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
+    bool useVirtualLeafBones = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
+    double virtualLeafBoneExtensionCm = 0.0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
     int32 minimumSegmentLength = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
@@ -122,6 +131,12 @@ struct HANDPOSETIMELINEDECISIONDATA_API FHandposeDecisionConfigSnapshot
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
     TArray<FString> leftHandBoneNames;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
+    TArray<FString> rightHandLeafBoneNames;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Decision Data")
+    TArray<FString> leftHandLeafBoneNames;
 };
 
 USTRUCT(BlueprintType)

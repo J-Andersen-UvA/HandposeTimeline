@@ -11,6 +11,18 @@ enum class MatchingMethod
     Manhattan
 };
 
+struct Position
+{
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
+struct HandSkeletonTrack
+{
+    std::vector<std::vector<Position>> frames;
+};
+
 struct Quaternion
 {
     double w = 1.0;
@@ -28,6 +40,12 @@ struct Match
 {
     int handshapeIndex = -1;
     double distance = 0.0;
+};
+
+struct HandSkeletonMatchDiagnostics
+{
+    std::vector<double> inputDescriptor;
+    std::vector<std::vector<double>> handshapeDescriptors;
 };
 
 struct Segment
@@ -53,4 +71,11 @@ std::vector<Match> matchPoses(
     const std::vector<Pose>& handshapes,
     const Pose& inputPose,
     MatchingMethod method);
+std::vector<Match> matchHandSkeletonTracks(
+    const std::vector<HandSkeletonTrack>& handshapes,
+    const HandSkeletonTrack& inputTrack,
+    int inputStartFrame,
+    int inputEndFrame,
+    MatchingMethod method,
+    HandSkeletonMatchDiagnostics* diagnostics);
 }

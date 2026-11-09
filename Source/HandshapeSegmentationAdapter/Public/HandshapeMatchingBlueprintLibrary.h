@@ -23,5 +23,9 @@ public:
         const TArray<UAnimSequenceBase*>& handshapeAnimations,
         FAnimPoseEvaluationOptions evaluationOptions,
         const FHandshapeSegmentationSettings& settings,
-        EHandshapeMatchingMethod matchingMethod);
+        EHandshapeMatchingMethod matchingMethod,
+        EHandshapeDescriptorMethod descriptorMethod,
+        const FHandshapeBoneMapping& boneMapping,
+        bool useVirtualLeafBones,
+        double virtualLeafBoneExtensionCm);
 };

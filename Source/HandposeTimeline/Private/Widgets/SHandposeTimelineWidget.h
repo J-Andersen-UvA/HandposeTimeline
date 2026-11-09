@@ -5,6 +5,7 @@
 #include "HandposeTimelineSegment.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
+#include "HandposeTimelineConfig.h" 
 
 class FHandposeTimelinePlaybackController;
 class SScrollBox;

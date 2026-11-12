@@ -91,6 +91,28 @@ bool FHandposeTimelineModule::hasAssignments() const
     return widget.IsValid() && widget->hasAssignments();
 }
 
+bool FHandposeTimelineModule::hasCustomPlaybackRange() const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() && widget->hasCustomPlaybackRange();
+}
+
+void FHandposeTimelineModule::getPlaybackRange(
+    int32& startFrame,
+    int32& endFrame) const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    if (widget.IsValid())
+    {
+        widget->getPlaybackRange(startFrame, endFrame);
+    }
+    else
+    {
+        startFrame = 0;
+        endFrame = 0;
+    }
+}
+
 bool FHandposeTimelineModule::bakeCurrentAnimation(
     UAnimSequence*& outputAnimation,
     FString& outputPath,

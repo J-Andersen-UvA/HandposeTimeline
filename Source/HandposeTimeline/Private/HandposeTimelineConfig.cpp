@@ -183,6 +183,22 @@ const FHandshapeBoneMapping& UHandposeTimelineConfig::getBoneMapping(
         : rightHandBoneMapping;
 }
 
+EAxis::Type UHandposeTimelineConfig::getHandposeMirrorFlipAxis() const
+{
+    switch (handposeMirrorFlipAxis)
+    {
+    case EHandposeMirrorFlipAxis::Y:
+        return EAxis::Y;
+    case EHandposeMirrorFlipAxis::Z:
+        return EAxis::Z;
+    case EHandposeMirrorFlipAxis::X:
+        return EAxis::X;
+    case EHandposeMirrorFlipAxis::None:
+    default:
+        return EAxis::None;
+    }
+}
+
 TArray<FName> UHandposeTimelineConfig::getConfiguredBoneNames(
     const EHandposeSide handSide) const
 {

@@ -1,16 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HandshapeMatchingTypes.h"
+#include "Preview/HandposePreviewTypes.h"
 
 class UAnimSequence;
 struct FHandposeAssignment;
-
-struct FHandposePreviewBuildResult
-{
-    bool success = false;
-    UAnimSequence* animation = nullptr;
-    FString errorMessage;
-};
 
 class FHandposePreviewBuilder
 {
@@ -19,5 +14,8 @@ public:
         UAnimSequence* sourceAnimation,
         const TArray<FHandposeAssignment>& assignments,
         const TArray<FName>& rightBoneNames,
-        const TArray<FName>& leftBoneNames);
+        const TArray<FName>& leftBoneNames,
+        const FHandshapeBoneMapping& rightBoneMapping,
+        const FHandshapeBoneMapping& leftBoneMapping,
+        EAxis::Type mirrorFlipAxis);
 };

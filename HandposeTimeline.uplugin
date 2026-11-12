@@ -13,6 +13,18 @@
     {
       "Name": "EditorScriptingUtilities",
       "Enabled": true
+    },
+    {
+      "Name": "AdditiveBoneCorrection",
+      "Enabled": true
+    },
+    {
+      "Name": "FaceTouchCorrection",
+      "Enabled": true
+    },
+    {
+      "Name": "SemanticSurfacePatches",
+      "Enabled": true
     }
   ],
   "Modules": [

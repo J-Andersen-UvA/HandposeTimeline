@@ -38,19 +38,20 @@ void FHandposeTimelinePlaybackController::tick()
     else if (isPlayingTimeline &&
         previewComponent != nullptr &&
         animation.IsValid() &&
-        currentTimeSeconds >= animation->GetPlayLength())
+        currentTimeSeconds >= playbackEndTimeSeconds)
     {
         if (loopAll)
         {
-            previewComponent->SetPosition(0.0f, false);
+            previewComponent->SetPosition(playbackStartTimeSeconds, false);
             previewComponent->SetPlayRate(playRate);
             previewComponent->Play(false);
-            currentTimeSeconds = 0.0f;
+            currentTimeSeconds = playbackStartTimeSeconds;
         }
         else
         {
             previewComponent->Stop();
-            currentTimeSeconds = animation->GetPlayLength();
+            previewComponent->SetPosition(playbackLastFrameTimeSeconds, false);
+            currentTimeSeconds = playbackLastFrameTimeSeconds;
             isPlayingTimeline = false;
         }
     }
@@ -62,7 +63,38 @@ void FHandposeTimelinePlaybackController::setAnimation(UAnimSequenceBase* newAni
     animation = newAnimation;
     previewStartTimeSeconds = 0.0f;
     previewEndTimeSeconds = 0.0f;
+    playbackStartTimeSeconds = 0.0f;
+    playbackEndTimeSeconds = newAnimation != nullptr
+        ? newAnimation->GetPlayLength()
+        : 0.0f;
+    playbackLastFrameTimeSeconds = playbackEndTimeSeconds;
     currentTimeSeconds = 0.0f;
+}
+
+void FHandposeTimelinePlaybackController::setPlaybackRange(
+    const int32 startFrame,
+    const int32 endFrame)
+{
+    UAnimSequenceBase* loadedAnimation = animation.Get();
+    if (loadedAnimation == nullptr || !loadedAnimation->GetSamplingFrameRate().IsValid())
+    {
+        playbackStartTimeSeconds = 0.0f;
+        playbackEndTimeSeconds = loadedAnimation != nullptr
+            ? loadedAnimation->GetPlayLength()
+            : 0.0f;
+        playbackLastFrameTimeSeconds = playbackEndTimeSeconds;
+        return;
+    }
+
+    const int32 lastFrame = FMath::Max(0, loadedAnimation->GetNumberOfSampledKeys() - 1);
+    const int32 clampedStartFrame = FMath::Clamp(startFrame, 0, lastFrame);
+    const int32 clampedEndFrame = FMath::Clamp(endFrame, clampedStartFrame, lastFrame);
+    const FFrameRate frameRate = loadedAnimation->GetSamplingFrameRate();
+    playbackStartTimeSeconds = static_cast<float>(frameRate.AsSeconds(clampedStartFrame));
+    playbackLastFrameTimeSeconds = static_cast<float>(frameRate.AsSeconds(clampedEndFrame));
+    playbackEndTimeSeconds = FMath::Min(
+        static_cast<float>(frameRate.AsSeconds(clampedEndFrame + 1)),
+        loadedAnimation->GetPlayLength());
 }
 
 EHandposeTimelineActorResult FHandposeTimelinePlaybackController::setActor(AActor* newActor)
@@ -98,9 +130,10 @@ EHandposeTimelinePlaybackResult FHandposeTimelinePlaybackController::playTimelin
 
     UAnimSequenceBase* loadedAnimation = animation.Get();
     USkeletalMeshComponent* previewComponent = skeletalMeshComponent.Get();
-    if (currentTimeSeconds >= loadedAnimation->GetPlayLength())
+    if (currentTimeSeconds < playbackStartTimeSeconds ||
+        currentTimeSeconds >= playbackEndTimeSeconds)
     {
-        currentTimeSeconds = 0.0f;
+        currentTimeSeconds = playbackStartTimeSeconds;
     }
 
     previewComponent->SetUpdateAnimationInEditor(true);
@@ -128,10 +161,17 @@ EHandposeTimelinePlaybackResult FHandposeTimelinePlaybackController::previewSegm
         return EHandposeTimelinePlaybackResult::InvalidFrameRate;
     }
 
-    previewStartTimeSeconds = static_cast<float>(frameRate.AsSeconds(segment.startFrame));
+    previewStartTimeSeconds = FMath::Max(
+        static_cast<float>(frameRate.AsSeconds(segment.startFrame)),
+        playbackStartTimeSeconds);
     previewEndTimeSeconds = FMath::Min(
         static_cast<float>(frameRate.AsSeconds(segment.endFrame + 1)),
-        loadedAnimation->GetPlayLength());
+        playbackEndTimeSeconds);
+    if (previewStartTimeSeconds >= previewEndTimeSeconds)
+    {
+        currentTimeSeconds = playbackStartTimeSeconds;
+        return EHandposeTimelinePlaybackResult::Success;
+    }
 
     USkeletalMeshComponent* previewComponent = skeletalMeshComponent.Get();
     previewComponent->SetUpdateAnimationInEditor(true);

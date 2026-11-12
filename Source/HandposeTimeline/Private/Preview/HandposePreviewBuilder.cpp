@@ -3,9 +3,12 @@
 #include "AnimPose.h"
 #include "Animation/AnimData/IAnimationDataController.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimationPoseUtilities.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "HandposeAssignment.h"
+#include "Handposes/HandposeMirrorService.h"
+#include "UObject/StrongObjectPtr.h"
 
 #define LOCTEXT_NAMESPACE "HandposePreviewBuilder"
 
@@ -44,55 +47,6 @@ bool isSkippedFinger(
         });
 }
 
-FAnimPoseEvaluationOptions makeEvaluationOptions()
-{
-    FAnimPoseEvaluationOptions options;
-    options.EvaluationType = EAnimDataEvalType::Raw;
-    options.bShouldRetarget = true;
-    options.bEvaluateCurves = false;
-    return options;
-}
-
-bool evaluatePoses(
-    UAnimSequenceBase& animation,
-    TArray<FAnimPose>& poses,
-    FString& errorMessage)
-{
-    const int32 frameCount = animation.GetNumberOfSampledKeys();
-    const FFrameRate frameRate = animation.GetSamplingFrameRate();
-    if (frameCount < 1 || !frameRate.IsValid())
-    {
-        errorMessage = FString::Printf(
-            TEXT("Animation %s has no sampled frames or has an invalid frame rate."),
-            *animation.GetName());
-        return false;
-    }
-
-    TArray<double> times;
-    times.Reserve(frameCount);
-    for (int32 frame = 0; frame < frameCount; ++frame)
-    {
-        times.Add(frameRate.AsSeconds(frame));
-    }
-    UAnimPoseExtensions::GetAnimPoseAtTimeIntervals(
-        &animation,
-        times,
-        makeEvaluationOptions(),
-        poses);
-    if (poses.Num() != frameCount || poses.ContainsByPredicate(
-            [](const FAnimPose& pose)
-            {
-                return !UAnimPoseExtensions::IsValid(pose);
-            }))
-    {
-        errorMessage = FString::Printf(
-            TEXT("Unreal could not evaluate every pose in %s."),
-            *animation.GetName());
-        return false;
-    }
-    return true;
-}
-
 bool calculateAverageRotations(
     UAnimSequenceBase& animation,
     const TArray<FName>& boneNames,
@@ -121,7 +75,10 @@ bool calculateAverageRotations(
     }
 
     TArray<FAnimPose> poses;
-    if (!evaluatePoses(animation, poses, errorMessage))
+    if (!HandposeTimeline::AnimationPoseUtilities::evaluatePoses(
+            animation,
+            poses,
+            errorMessage))
     {
         return false;
     }
@@ -195,13 +152,17 @@ FQuat evaluateRotation(
     }
     return result;
 }
+
 }
 
 FHandposePreviewBuildResult FHandposePreviewBuilder::build(
     UAnimSequence* sourceAnimation,
     const TArray<FHandposeAssignment>& assignments,
     const TArray<FName>& rightBoneNames,
-    const TArray<FName>& leftBoneNames)
+    const TArray<FName>& leftBoneNames,
+    const FHandshapeBoneMapping& rightBoneMapping,
+    const FHandshapeBoneMapping& leftBoneMapping,
+    const EAxis::Type mirrorFlipAxis)
 {
     FHandposePreviewBuildResult result;
     if (sourceAnimation == nullptr || assignments.IsEmpty())
@@ -237,13 +198,17 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
     }
 
     TArray<FAnimPose> sourcePoses;
-    if (!evaluatePoses(*sourceAnimation, sourcePoses, result.errorMessage))
+    if (!HandposeTimeline::AnimationPoseUtilities::evaluatePoses(
+            *sourceAnimation,
+            sourcePoses,
+            result.errorMessage))
     {
         return result;
     }
 
     TArray<TMap<FName, FQuat>> rotationsByAssignment;
     rotationsByAssignment.SetNum(assignments.Num());
+    TArray<TStrongObjectPtr<UAnimSequence>> remappedHandshapeAnimations;
     for (int32 assignmentIndex = 0; assignmentIndex < assignments.Num(); ++assignmentIndex)
     {
         const TArray<FName>& handBoneNames =
@@ -256,9 +221,26 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
             return result;
         }
         TArray<FName> assignmentBoneNames;
+        TArray<FName> remappedTargetBoneNames;
+        if (assignments[assignmentIndex].mirrorToOppositeHand)
+        {
+            const FHandshapeBoneMapping& sourceMapping =
+                assignments[assignmentIndex].handSide == EHandposeSide::Left
+                    ? rightBoneMapping
+                    : leftBoneMapping;
+            const FHandshapeBoneMapping& targetMapping =
+                assignments[assignmentIndex].handSide == EHandposeSide::Left
+                    ? leftBoneMapping
+                    : rightBoneMapping;
+            remappedTargetBoneNames = FHandposeMirrorService::getTargetBoneNames(
+                sourceMapping,
+                targetMapping);
+        }
         for (const FName boneName : handBoneNames)
         {
-            if (!isSkippedFinger(
+            if ((!assignments[assignmentIndex].mirrorToOppositeHand ||
+                    remappedTargetBoneNames.Contains(boneName)) &&
+                !isSkippedFinger(
                     boneName,
                     assignments[assignmentIndex].skippedFingers))
             {
@@ -267,6 +249,31 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
         }
         UAnimSequenceBase* handshapeAnimation =
             assignments[assignmentIndex].handshapeAnimation.LoadSynchronous();
+        if (assignments[assignmentIndex].mirrorToOppositeHand)
+        {
+            UAnimSequence* sourceHandshape = Cast<UAnimSequence>(handshapeAnimation);
+            const FHandshapeBoneMapping& sourceMapping =
+                assignments[assignmentIndex].handSide == EHandposeSide::Left
+                    ? rightBoneMapping
+                    : leftBoneMapping;
+            const FHandshapeBoneMapping& targetMapping =
+                assignments[assignmentIndex].handSide == EHandposeSide::Left
+                    ? leftBoneMapping
+                    : rightBoneMapping;
+            const FHandposeMirrorResult remapResult =
+                FHandposeMirrorService::remapAnimationToOppositeHand(
+                    sourceHandshape,
+                    sourceMapping,
+                    targetMapping,
+                    mirrorFlipAxis);
+            if (!remapResult.success || remapResult.animation == nullptr)
+            {
+                result.errorMessage = remapResult.errorMessage;
+                return result;
+            }
+            remappedHandshapeAnimations.Emplace(remapResult.animation);
+            handshapeAnimation = remapResult.animation;
+        }
         if (handshapeAnimation == nullptr ||
             !calculateAverageRotations(
                 *handshapeAnimation,
@@ -333,13 +340,10 @@ FHandposePreviewBuildResult FHandposePreviewBuilder::build(
         }
     }
 
-    UAnimSequence* preview = DuplicateObject<UAnimSequence>(
-        sourceAnimation,
-        GetTransientPackage(),
-        MakeUniqueObjectName(
-            GetTransientPackage(),
-            UAnimSequence::StaticClass(),
-            TEXT("HandposeTimelinePreview")));
+    UAnimSequence* preview =
+        HandposeTimeline::AnimationPoseUtilities::duplicateTransientAnimation(
+            *sourceAnimation,
+            TEXT("HandposeTimelinePreview"));
     if (preview == nullptr)
     {
         result.errorMessage = TEXT("Unreal could not create the transient preview animation.");

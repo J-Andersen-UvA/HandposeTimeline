@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FaceTouchCorrectionTypes.h"
 #include "HandposeAssignment.h"
 #include "HandshapeCandidate.h"
 #include "HandposeTimelineSegment.h"
@@ -24,6 +25,7 @@ public:
     }
     SLATE_END_ARGS()
 
+    virtual ~SHandposeTimelineWidget() override;
     void Construct(const FArguments& arguments);
     virtual void Tick(
         const FGeometry& allottedGeometry,
@@ -43,6 +45,8 @@ public:
     void resetSession();
     bool canBakeCurrentAnimation() const;
     bool hasAssignments() const;
+    bool hasCustomPlaybackRange() const;
+    void getPlaybackRange(int32& startFrame, int32& endFrame) const;
     bool bakeCurrentAnimation(
         UAnimSequence*& outputAnimation,
         FString& outputPath,
@@ -54,10 +58,12 @@ private:
     FReply onLoadAnimationClicked();
     FReply onLoadConfigClicked();
     FReply onUseSelectedActorClicked();
+    FReply onFaceTouchCorrectionModeClicked();
     FReply onLoopAllClicked();
     FReply onLoopSegmentClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
+    FReply onShortcutsHelpClicked();
     FReply onBakeClicked();
     FReply onSaveDecisionDataClicked();
     FReply onImportDecisionDataClicked();
@@ -78,9 +84,31 @@ private:
         const TArray<EHandposeFinger>& skippedFingers,
         EHandposeSide handSide,
         int32 assignmentIndex);
+    void onFaceTouchCorrectionSelected(
+        EHandposeSide handSide,
+        int32 correctionIndex);
+    void onFaceTouchCorrectionChanged(
+        EHandposeSide handSide,
+        int32 correctionIndex,
+        const FFaceTouchCorrectionBlock& correction,
+        bool isFinal);
+    void onFaceTouchCorrectionEditRequested(
+        EHandposeSide handSide,
+        int32 correctionIndex);
+    FReply adjustFaceTouchNormalOffset(
+        EHandposeSide handSide,
+        int32 correctionIndex,
+        float offsetDelta);
+    void onFaceSurfaceClicked(const FFaceTouchSurfaceLocation& surfaceLocation);
+    void onFaceTouchPointsChosen(const TArray<FName>& pointIds);
+    TArray<FName> getFaceTouchPointIds(EHandposeSide handSide) const;
     void removeSelectedAssignment();
+    void removeSelectedFaceTouchCorrection();
     void onPlayheadScrubbed(float timeSeconds);
     void stepFrame(int32 frameOffset);
+    void setTrimStartAtPlayhead();
+    void setTrimEndAtPlayhead();
+    void applyPlaybackRange();
     void onZoomChanged(float sliderValue);
     void onZoomWheel(float wheelDelta);
     void loadConfig(UHandposeTimelineConfig* config);
@@ -105,13 +133,19 @@ private:
     const TArray<FHandposeTimelineSegment>& getSegments(EHandposeSide handSide) const;
     TArray<FHandposeAssignment>& getAssignments(EHandposeSide handSide);
     const TArray<FHandposeAssignment>& getAssignments(EHandposeSide handSide) const;
+    TArray<FFaceTouchCorrectionBlock>& getFaceTouchCorrections(EHandposeSide handSide);
+    const TArray<FFaceTouchCorrectionBlock>& getFaceTouchCorrections(
+        EHandposeSide handSide) const;
     int32& getSelectedSegmentIndex(EHandposeSide handSide);
     int32& getSelectedAssignmentIndex(EHandposeSide handSide);
+    int32& getSelectedFaceTouchCorrectionIndex(EHandposeSide handSide);
     TArray<FHandposeAssignment> getAllAssignments() const;
     void refreshTimeline();
     float getCurrentTimeSeconds() const;
     FText getPlayPauseButtonText() const;
     FText getTimecodeText() const;
+    FText getTrimRangeText() const;
+    int32 getCurrentFrame() const;
     TArray<FName> getSegmentationBoneNames(
         const UAnimSequenceBase& animation,
         EHandposeSide handSide) const;
@@ -123,16 +157,27 @@ private:
     TArray<FHandposeTimelineSegment> leftSegments;
     TArray<FHandposeAssignment> rightAssignments;
     TArray<FHandposeAssignment> leftAssignments;
+    TArray<FFaceTouchCorrectionBlock> rightFaceTouchCorrections;
+    TArray<FFaceTouchCorrectionBlock> leftFaceTouchCorrections;
     int32 selectedRightSegmentIndex = INDEX_NONE;
     int32 selectedLeftSegmentIndex = INDEX_NONE;
     int32 selectedRightAssignmentIndex = INDEX_NONE;
     int32 selectedLeftAssignmentIndex = INDEX_NONE;
+    int32 selectedRightFaceTouchCorrectionIndex = INDEX_NONE;
+    int32 selectedLeftFaceTouchCorrectionIndex = INDEX_NONE;
     EHandposeSide selectedHandSide = EHandposeSide::Right;
     float timelineZoom = 1.0f;
+    int32 trimStartFrame = 0;
+    int32 trimEndFrame = 0;
+    bool faceTouchCorrectionModeEnabled = false;
     TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
     TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;
     TSharedPtr<SHandposeTimelineTrack> leftTimelineTrack;
     TWeakPtr<SWindow> handshapePickerWindow;
+    TWeakPtr<SWindow> faceTouchPointPickerWindow;
+    FFaceTouchSurfaceLocation pendingFaceTouchSurfaceLocation;
+    EHandposeSide pendingFaceTouchHandSide = EHandposeSide::Right;
+    int32 pendingFaceTouchFrame = INDEX_NONE;
     TSharedPtr<STextBlock> configNameText;
     TSharedPtr<STextBlock> animationNameText;
     TSharedPtr<STextBlock> actorNameText;

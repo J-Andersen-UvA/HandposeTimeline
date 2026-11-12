@@ -1,0 +1,3 @@
+[submodule "ThirdParty/HandshapeSegmentation"]
+	path = ThirdParty/HandshapeSegmentation
+	url = https://github.com/JustinSaenCity/HandshapeSegmentation.git

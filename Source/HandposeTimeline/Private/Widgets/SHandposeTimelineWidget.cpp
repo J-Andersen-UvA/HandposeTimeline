@@ -10,6 +10,7 @@
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
+#include "FaceTouchCorrectionEditorModule.h"
 #include "GameFramework/Actor.h"
 #include "HandshapeSegmentationBlueprintLibrary.h"
 #include "HandshapeSegmentationTypes.h"
@@ -22,13 +23,19 @@
 #include "IDesktopPlatform.h"
 #include "InputCoreTypes.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
+#include "SemanticInteractionPointComponent.h"
 #include "Playback/HandposeTimelinePlaybackController.h"
 #include "Preview/HandposePreviewBuilder.h"
+#include "FaceTouch/FaceTouchPreviewBuilder.h"
+#include "Handposes/HandposeMirrorService.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSlider.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -119,6 +126,140 @@ private:
     TFunction<void(float)> onZoomWheel;
     TFunction<void(float)> onHorizontalWheel;
 };
+
+DECLARE_DELEGATE_OneParam(
+    FOnFaceTouchPointsChosen,
+    const TArray<FName>&)
+
+class SFaceTouchPointPicker : public SCompoundWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SFaceTouchPointPicker)
+    {
+    }
+        SLATE_ARGUMENT(TArray<FName>, PointIds)
+        SLATE_EVENT(FOnFaceTouchPointsChosen, OnPointsChosen)
+    SLATE_END_ARGS()
+
+    void Construct(const FArguments& arguments)
+    {
+        pointIds = arguments._PointIds;
+        onPointsChosen = arguments._OnPointsChosen;
+
+        TSharedRef<SVerticalBox> pointList = SNew(SVerticalBox);
+        for (const FName pointId : pointIds)
+        {
+            pointList->AddSlot()
+            .AutoHeight()
+            .Padding(4.0f)
+            [
+                SNew(SCheckBox)
+                .OnCheckStateChanged_Lambda(
+                    [this, pointId](const ECheckBoxState state)
+                    {
+                        if (state == ECheckBoxState::Checked)
+                        {
+                            selectedPointIds.Add(pointId);
+                        }
+                        else
+                        {
+                            selectedPointIds.Remove(pointId);
+                        }
+                    })
+                [
+                    SNew(STextBlock)
+                    .Text(FText::FromName(pointId))
+                ]
+            ];
+        }
+
+        ChildSlot
+        [
+            SNew(SVerticalBox)
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(8.0f)
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT(
+                    "ChooseFaceTouchPoints",
+                    "Which finger or fingers should reach this location?"))
+            ]
+            + SVerticalBox::Slot()
+            .FillHeight(1.0f)
+            .Padding(8.0f, 0.0f)
+            [
+                SNew(SScrollBox)
+                + SScrollBox::Slot()
+                [
+                    pointList
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .HAlign(HAlign_Right)
+            .Padding(8.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SButton)
+                    .Text(LOCTEXT("CancelFaceTouch", "Cancel"))
+                    .OnClicked_Lambda(
+                        [this]()
+                        {
+                            if (ownerWindow.IsValid())
+                            {
+                                ownerWindow.Pin()->RequestDestroyWindow();
+                            }
+                            return FReply::Handled();
+                        })
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                [
+                    SNew(SButton)
+                    .Text(LOCTEXT("CreateFaceTouch", "Create Correction"))
+                    .IsEnabled_Lambda([this]() { return !selectedPointIds.IsEmpty(); })
+                    .OnClicked_Lambda(
+                        [this]()
+                        {
+                            TArray<FName> selected = selectedPointIds.Array();
+                            selected.Sort(FNameLexicalLess());
+                            onPointsChosen.ExecuteIfBound(selected);
+                            if (ownerWindow.IsValid())
+                            {
+                                ownerWindow.Pin()->RequestDestroyWindow();
+                            }
+                            return FReply::Handled();
+                        })
+                ]
+            ]
+        ];
+    }
+
+    void setOwnerWindow(const TSharedRef<SWindow>& window)
+    {
+        ownerWindow = window;
+    }
+
+private:
+    TArray<FName> pointIds;
+    TSet<FName> selectedPointIds;
+    FOnFaceTouchPointsChosen onPointsChosen;
+    TWeakPtr<SWindow> ownerWindow;
+};
+
+SHandposeTimelineWidget::~SHandposeTimelineWidget()
+{
+    if (!IsEngineExitRequested() &&
+        FModuleManager::Get().IsModuleLoaded(TEXT("FaceTouchCorrectionEditor")))
+    {
+        IFaceTouchCorrectionEditorModule::get().endFacePicking();
+    }
+}
 
 void SHandposeTimelineWidget::Construct(const FArguments& arguments)
 {
@@ -221,6 +362,29 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             [
                 SAssignNew(actorNameText, STextBlock)
                 .Text(LOCTEXT("NoActor", "No actor selected"))
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT(
+                    "FaceTouchCorrectionMode",
+                    "FaceTouchCorrectionModus"))
+                .ToolTipText(LOCTEXT(
+                    "FaceTouchCorrectionModeTooltip",
+                    "Show face-touch correction lanes and enable face-touch authoring."))
+                .ButtonColorAndOpacity_Lambda(
+                    [this]()
+                    {
+                        return faceTouchCorrectionModeEnabled
+                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                            : FLinearColor::White;
+                    })
+                .OnClicked(
+                    this,
+                    &SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked)
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -338,6 +502,30 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 .Text(this, &SHandposeTimelineWidget::getTimecodeText)
                 .Font(FAppStyle::GetFontStyle(TEXT("MonospacedText")))
             ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(12.0f, 0.0f)
+            [
+                SNew(STextBlock)
+                .Text(this, &SHandposeTimelineWidget::getTrimRangeText)
+                .ToolTipText(LOCTEXT(
+                    "TrimRangeTooltip",
+                    "Press [ to set the trim start and ] to set the trim end at the playhead."))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("ShortcutsHelp", "?"))
+                .ToolTipText(LOCTEXT(
+                    "ShortcutsHelpTooltip",
+                    "Show HandposeTimeline shortcuts."))
+                .OnClicked(this, &SHandposeTimelineWidget::onShortcutsHelpClicked)
+            ]
         ]
         + SVerticalBox::Slot()
         .FillHeight(1.0f)
@@ -362,6 +550,15 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                     .OnAssignmentFingerEditRequested(
                         this,
                         &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                    .OnFaceTouchCorrectionSelected(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
+                    .OnFaceTouchCorrectionChanged(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
+                    .OnFaceTouchCorrectionEditRequested(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
                 ]
                 + SScrollBox::Slot()
                 [
@@ -375,6 +572,15 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                     .OnAssignmentFingerEditRequested(
                         this,
                         &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                    .OnFaceTouchCorrectionSelected(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
+                    .OnFaceTouchCorrectionChanged(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
+                    .OnFaceTouchCorrectionEditRequested(
+                        this,
+                        &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
                 ]
             ]
         ]
@@ -418,7 +624,18 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
     }
     if (keyEvent.GetKey() == EKeys::Delete)
     {
-        removeSelectedAssignment();
+        const TArray<FFaceTouchCorrectionBlock>& corrections =
+            getFaceTouchCorrections(selectedHandSide);
+        const int32 selectedCorrectionIndex =
+            getSelectedFaceTouchCorrectionIndex(selectedHandSide);
+        if (corrections.IsValidIndex(selectedCorrectionIndex))
+        {
+            removeSelectedFaceTouchCorrection();
+        }
+        else
+        {
+            removeSelectedAssignment();
+        }
         return FReply::Handled();
     }
     if (keyEvent.GetKey() == EKeys::Left)
@@ -429,6 +646,16 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
     if (keyEvent.GetKey() == EKeys::Right)
     {
         stepFrame(1);
+        return FReply::Handled();
+    }
+    if (keyEvent.GetKey() == EKeys::LeftBracket && !keyEvent.IsRepeat())
+    {
+        setTrimStartAtPlayhead();
+        return FReply::Handled();
+    }
+    if (keyEvent.GetKey() == EKeys::RightBracket && !keyEvent.IsRepeat())
+    {
+        setTrimEndAtPlayhead();
         return FReply::Handled();
     }
     return SCompoundWidget::OnPreviewKeyDown(myGeometry, keyEvent);
@@ -520,7 +747,41 @@ FReply SHandposeTimelineWidget::onUseSelectedActorClicked()
         statusText->SetText(FText::Format(
             LOCTEXT("PreviewActorSelected", "Using {0} for segment previews."),
             FText::FromString(selectedActor->GetActorLabel())));
+        if (faceTouchCorrectionModeEnabled)
+        {
+            IFaceTouchCorrectionEditorModule::get().beginFacePicking(
+                selectedActor,
+                FOnFaceTouchSurfaceClicked::CreateSP(
+                    this,
+                    &SHandposeTimelineWidget::onFaceSurfaceClicked));
+        }
     }
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked()
+{
+    faceTouchCorrectionModeEnabled = !faceTouchCorrectionModeEnabled;
+    if (faceTouchCorrectionModeEnabled)
+    {
+        IFaceTouchCorrectionEditorModule::get().beginFacePicking(
+            playbackController->getActor(),
+            FOnFaceTouchSurfaceClicked::CreateSP(
+                this,
+                &SHandposeTimelineWidget::onFaceSurfaceClicked));
+    }
+    else
+    {
+        IFaceTouchCorrectionEditorModule::get().endFacePicking();
+    }
+    statusText->SetText(faceTouchCorrectionModeEnabled
+        ? LOCTEXT(
+            "FaceTouchCorrectionModeEnabled",
+            "Face touch correction mode is active. Select a frame, then click the target face.")
+        : LOCTEXT(
+            "FaceTouchCorrectionModeDisabled",
+            "Face touch correction mode is inactive."));
+    refreshTimeline();
     return FReply::Handled();
 }
 
@@ -586,6 +847,29 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
             "IncompatibleTimelineActor",
             "The selected actor's skeletal mesh is not compatible with the loaded animation."));
     }
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onShortcutsHelpClicked()
+{
+    FMessageDialog::Open(
+        EAppMsgType::Ok,
+        LOCTEXT(
+            "ShortcutsHelpText",
+            "Keyboard\n"
+            "Space    Play or pause\n"
+            "Left / Right    Step one frame\n"
+            "[    Set trim start at the playhead\n"
+            "]    Set trim end at the playhead\n"
+            "Delete    Remove the selected assigned handshape\n\n"
+            "Mouse\n"
+            "Ctrl + Wheel    Zoom the timeline\n"
+            "Shift + Wheel    Scroll horizontally\n"
+            "Drag the frame ruler    Scrub the animation\n"
+            "Click a segment    Preview it and open the handshape picker\n"
+            "Right-click an assignment    Edit skipped fingers\n"
+            "Drag assignment edges or handles    Adjust its range and blending"),
+        LOCTEXT("ShortcutsHelpTitle", "HandposeTimeline Shortcuts"));
     return FReply::Handled();
 }
 
@@ -672,12 +956,31 @@ bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
 {
     return Cast<UAnimSequence>(loadedAnimation.Get()) != nullptr &&
         loadedConfig.IsValid() &&
-        hasAssignments();
+        (hasAssignments() ||
+            !rightFaceTouchCorrections.IsEmpty() ||
+            !leftFaceTouchCorrections.IsEmpty() ||
+            hasCustomPlaybackRange());
 }
 
 bool SHandposeTimelineWidget::hasAssignments() const
 {
     return !rightAssignments.IsEmpty() || !leftAssignments.IsEmpty();
+}
+
+bool SHandposeTimelineWidget::hasCustomPlaybackRange() const
+{
+    const UAnimSequenceBase* animation = loadedAnimation.Get();
+    return animation != nullptr &&
+        (trimStartFrame > 0 ||
+            trimEndFrame < FMath::Max(0, animation->GetNumberOfSampledKeys() - 1));
+}
+
+void SHandposeTimelineWidget::getPlaybackRange(
+    int32& startFrame,
+    int32& endFrame) const
+{
+    startFrame = trimStartFrame;
+    endFrame = trimEndFrame;
 }
 
 bool SHandposeTimelineWidget::bakeCurrentAnimation(
@@ -698,20 +1001,25 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
         errorMessage = TEXT("Load an animation and config before baking.");
         return false;
     }
-    if (!hasAssignments())
+    const bool hasFaceTouchCorrections =
+        !rightFaceTouchCorrections.IsEmpty() ||
+        !leftFaceTouchCorrections.IsEmpty();
+    if (!hasAssignments() && !hasFaceTouchCorrections && !hasCustomPlaybackRange())
     {
-        errorMessage = TEXT("Assign at least one handshape before baking.");
+        errorMessage = TEXT("Assign at least one handshape or trim the animation before baking.");
         return false;
     }
-    if (!previewAnimation.IsValid())
+    if ((hasAssignments() || hasFaceTouchCorrections) && !previewAnimation.IsValid())
     {
         rebuildPreviewAnimation(false);
     }
 
     const FHandposeBakeResult result = FHandposeBakeService::bake(
-        previewAnimation.Get(),
+        previewAnimation.IsValid() ? previewAnimation.Get() : sourceAnimation,
         sourceAnimation,
-        config->getBakedAnimationOutputPath());
+        config->getBakedAnimationOutputPath(),
+        trimStartFrame,
+        trimEndFrame);
     outputAnimation = result.animation;
     outputPath = result.outputPath;
     errorMessage = result.errorMessage;
@@ -798,6 +1106,7 @@ void SHandposeTimelineWidget::onHandshapeChosen(
     assignment.handshapeId = candidate.handshapeId;
     assignment.handshapeAnimation = candidate.handshapeAnimation;
     assignment.handSide = handSide;
+    assignment.mirrorToOppositeHand = candidate.mirrorToOppositeHand;
     assignment.skippedFingers = candidate.skippedFingers;
     linkOverlappingAssignments(handSide);
     updateAssignmentCoverage(handSide);
@@ -823,6 +1132,8 @@ void SHandposeTimelineWidget::onAssignmentSelected(
         return;
     }
     selectedAssignmentIndex = assignmentIndex;
+    selectedRightFaceTouchCorrectionIndex = INDEX_NONE;
+    selectedLeftFaceTouchCorrectionIndex = INDEX_NONE;
     selectedHandSide = handSide;
     selectedSegmentIndex = assignments[assignmentIndex].sourceSegmentIndex;
     const FHandposeAssignment& assignment = assignments[assignmentIndex];
@@ -915,6 +1226,290 @@ void SHandposeTimelineWidget::onAssignmentFingerEditRequested(
     }
 }
 
+void SHandposeTimelineWidget::onFaceTouchCorrectionSelected(
+    const EHandposeSide handSide,
+    const int32 correctionIndex)
+{
+    TArray<FFaceTouchCorrectionBlock>& corrections = getFaceTouchCorrections(handSide);
+    if (!corrections.IsValidIndex(correctionIndex))
+    {
+        return;
+    }
+
+    selectedHandSide = handSide;
+    selectedRightAssignmentIndex = INDEX_NONE;
+    selectedLeftAssignmentIndex = INDEX_NONE;
+    getSelectedFaceTouchCorrectionIndex(
+        handSide == EHandposeSide::Left
+            ? EHandposeSide::Right
+            : EHandposeSide::Left) = INDEX_NONE;
+    getSelectedFaceTouchCorrectionIndex(handSide) = correctionIndex;
+    const FFaceTouchCorrectionBlock& correction = corrections[correctionIndex];
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "FaceTouchCorrectionSelected",
+            "{0}: zero {1}, touch {2}-{3}, zero {4}."),
+        correction.getDisplayName(),
+        FText::AsNumber(correction.approachZeroFrame),
+        FText::AsNumber(correction.touchStartFrame),
+        FText::AsNumber(correction.touchEndFrame),
+        FText::AsNumber(correction.recoveryZeroFrame)));
+    refreshTimeline();
+}
+
+void SHandposeTimelineWidget::onFaceTouchCorrectionChanged(
+    const EHandposeSide handSide,
+    const int32 correctionIndex,
+    const FFaceTouchCorrectionBlock& correction,
+    const bool isFinal)
+{
+    TArray<FFaceTouchCorrectionBlock>& corrections = getFaceTouchCorrections(handSide);
+    if (!corrections.IsValidIndex(correctionIndex))
+    {
+        return;
+    }
+
+    corrections[correctionIndex] = correction;
+    corrections[correctionIndex].handSide = handSide == EHandposeSide::Left
+        ? EFaceTouchHandSide::Left
+        : EFaceTouchHandSide::Right;
+    getSelectedFaceTouchCorrectionIndex(handSide) = correctionIndex;
+    selectedHandSide = handSide;
+    if (isFinal)
+    {
+        rebuildPreviewAnimation(true);
+        refreshTimeline();
+    }
+}
+
+void SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested(
+    const EHandposeSide handSide,
+    const int32 correctionIndex)
+{
+    const TArray<FFaceTouchCorrectionBlock>& corrections =
+        getFaceTouchCorrections(handSide);
+    if (!corrections.IsValidIndex(correctionIndex))
+    {
+        return;
+    }
+
+    const TSharedRef<SWidget> popup =
+        SNew(SBorder)
+        .Padding(4.0f)
+        .BorderImage(FAppStyle::GetBrush("Menu.Background"))
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(2.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("MoveTouchCloser", "+"))
+                .ToolTipText(LOCTEXT(
+                    "MoveTouchCloserTooltip",
+                    "Move the selected interaction point 0.1 cm closer to the surface."))
+                .OnClicked(
+                    this,
+                    &SHandposeTimelineWidget::adjustFaceTouchNormalOffset,
+                    handSide,
+                    correctionIndex,
+                    0.1f)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(2.0f)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("MoveTouchFurther", "−"))
+                .ToolTipText(LOCTEXT(
+                    "MoveTouchFurtherTooltip",
+                    "Move the selected interaction point 0.1 cm further from the surface."))
+                .OnClicked(
+                    this,
+                    &SHandposeTimelineWidget::adjustFaceTouchNormalOffset,
+                    handSide,
+                    correctionIndex,
+                    -0.1f)
+            ]
+        ];
+    FSlateApplication::Get().PushMenu(
+        SharedThis(this),
+        FWidgetPath(),
+        popup,
+        FSlateApplication::Get().GetCursorPos(),
+        FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
+}
+
+FReply SHandposeTimelineWidget::adjustFaceTouchNormalOffset(
+    const EHandposeSide handSide,
+    const int32 correctionIndex,
+    const float offsetDelta)
+{
+    TArray<FFaceTouchCorrectionBlock>& corrections =
+        getFaceTouchCorrections(handSide);
+    if (!corrections.IsValidIndex(correctionIndex))
+    {
+        return FReply::Handled();
+    }
+
+    FFaceTouchCorrectionBlock& correction = corrections[correctionIndex];
+    correction.surfaceLocation.normalOffset = FMath::Clamp(
+        correction.surfaceLocation.normalOffset + offsetDelta,
+        -5.0f,
+        5.0f);
+    selectedHandSide = handSide;
+    getSelectedFaceTouchCorrectionIndex(handSide) = correctionIndex;
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "FaceTouchNormalOffsetChanged",
+            "{0}: surface offset {1} cm."),
+        correction.getDisplayName(),
+        FText::AsNumber(correction.surfaceLocation.normalOffset)));
+    FSlateApplication::Get().DismissAllMenus();
+    rebuildPreviewAnimation(true);
+    refreshTimeline();
+    return FReply::Handled();
+}
+
+void SHandposeTimelineWidget::onFaceSurfaceClicked(
+    const FFaceTouchSurfaceLocation& surfaceLocation)
+{
+    pendingFaceTouchSurfaceLocation = surfaceLocation;
+    pendingFaceTouchHandSide = selectedHandSide;
+    pendingFaceTouchFrame = getCurrentFrame();
+
+    const TArray<FName> pointIds = getFaceTouchPointIds(selectedHandSide);
+    if (pointIds.IsEmpty())
+    {
+        statusText->SetText(LOCTEXT(
+            "NoFaceTouchPoints",
+            "The selected actor has no interaction points for the selected hand."));
+        return;
+    }
+
+    if (const TSharedPtr<SWindow> existingWindow = faceTouchPointPickerWindow.Pin())
+    {
+        existingWindow->RequestDestroyWindow();
+    }
+
+    const TSharedRef<SWindow> pickerWindow = SNew(SWindow)
+        .Title(LOCTEXT("FaceTouchPointPickerTitle", "Select Touching Fingers"))
+        .ClientSize(FVector2D(390.0f, 360.0f))
+        .SupportsMaximize(false)
+        .SupportsMinimize(false);
+    const TSharedRef<SFaceTouchPointPicker> picker = SNew(SFaceTouchPointPicker)
+        .PointIds(pointIds)
+        .OnPointsChosen(
+            this,
+            &SHandposeTimelineWidget::onFaceTouchPointsChosen);
+    picker->setOwnerWindow(pickerWindow);
+    pickerWindow->SetContent(picker);
+    faceTouchPointPickerWindow = pickerWindow;
+
+    const TSharedPtr<SWindow> parentWindow =
+        FSlateApplication::Get().FindWidgetWindow(SharedThis(this));
+    if (parentWindow.IsValid())
+    {
+        FSlateApplication::Get().AddWindowAsNativeChild(
+            pickerWindow,
+            parentWindow.ToSharedRef());
+    }
+    else
+    {
+        FSlateApplication::Get().AddWindow(pickerWindow);
+    }
+}
+
+void SHandposeTimelineWidget::onFaceTouchPointsChosen(
+    const TArray<FName>& pointIds)
+{
+    UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || pendingFaceTouchFrame == INDEX_NONE || pointIds.IsEmpty())
+    {
+        return;
+    }
+
+    const int32 lastFrame = FMath::Max(0, animation->GetNumberOfSampledKeys() - 1);
+    int32 approachZeroFrame = FMath::Max(0, pendingFaceTouchFrame - 10);
+    int32 recoveryZeroFrame = FMath::Min(lastFrame, pendingFaceTouchFrame + 10);
+    const TArray<FHandposeTimelineSegment>& segments =
+        getSegments(pendingFaceTouchHandSide);
+    const int32 selectedSegmentIndex =
+        getSelectedSegmentIndex(pendingFaceTouchHandSide);
+    if (segments.IsValidIndex(selectedSegmentIndex))
+    {
+        approachZeroFrame = FMath::Min(
+            pendingFaceTouchFrame,
+            segments[selectedSegmentIndex].startFrame);
+        recoveryZeroFrame = FMath::Max(
+            pendingFaceTouchFrame,
+            segments[selectedSegmentIndex].endFrame);
+    }
+
+    FFaceTouchCorrectionBlock correction;
+    correction.handSide = pendingFaceTouchHandSide == EHandposeSide::Left
+        ? EFaceTouchHandSide::Left
+        : EFaceTouchHandSide::Right;
+    correction.interactionPointIds = pointIds;
+    correction.solveFrame = pendingFaceTouchFrame;
+    correction.approachZeroFrame = approachZeroFrame;
+    correction.touchStartFrame = pendingFaceTouchFrame;
+    correction.touchEndFrame = FMath::Min(
+        recoveryZeroFrame,
+        pendingFaceTouchFrame + 1);
+    correction.recoveryZeroFrame = recoveryZeroFrame;
+    correction.surfaceLocation = pendingFaceTouchSurfaceLocation;
+
+    TArray<FFaceTouchCorrectionBlock>& corrections =
+        getFaceTouchCorrections(pendingFaceTouchHandSide);
+    const int32 correctionIndex = corrections.Add(correction);
+    getSelectedFaceTouchCorrectionIndex(pendingFaceTouchHandSide) = correctionIndex;
+    getSelectedFaceTouchCorrectionIndex(
+        pendingFaceTouchHandSide == EHandposeSide::Left
+            ? EHandposeSide::Right
+            : EHandposeSide::Left) = INDEX_NONE;
+    selectedRightAssignmentIndex = INDEX_NONE;
+    selectedLeftAssignmentIndex = INDEX_NONE;
+    selectedHandSide = pendingFaceTouchHandSide;
+    pendingFaceTouchFrame = INDEX_NONE;
+
+    statusText->SetText(FText::Format(
+        LOCTEXT(
+            "FaceTouchCorrectionCreated",
+            "Created {0} at frame {1}. Drag the block edges and handles to adjust timing."),
+        correction.getDisplayName(),
+        FText::AsNumber(correction.touchStartFrame)));
+    rebuildPreviewAnimation(true);
+    refreshTimeline();
+}
+
+TArray<FName> SHandposeTimelineWidget::getFaceTouchPointIds(
+    const EHandposeSide handSide) const
+{
+    TArray<FName> pointIds;
+    AActor* actor = playbackController->getActor();
+    if (actor == nullptr)
+    {
+        return pointIds;
+    }
+
+    TArray<USemanticInteractionPointComponent*> pointComponents;
+    actor->GetComponents(pointComponents);
+    const FString sidePrefix = handSide == EHandposeSide::Left
+        ? TEXT("left")
+        : TEXT("right");
+    for (const USemanticInteractionPointComponent* point : pointComponents)
+    {
+        if (point != nullptr &&
+            point->pointId.ToString().StartsWith(sidePrefix, ESearchCase::IgnoreCase))
+        {
+            pointIds.AddUnique(point->pointId);
+        }
+    }
+    pointIds.Sort(FNameLexicalLess());
+    return pointIds;
+}
+
 void SHandposeTimelineWidget::onAssignmentSkippedFingersChosen(
     const TArray<EHandposeFinger>& skippedFingers,
     const EHandposeSide handSide,
@@ -959,6 +1554,29 @@ void SHandposeTimelineWidget::removeSelectedAssignment()
     refreshTimeline();
 }
 
+void SHandposeTimelineWidget::removeSelectedFaceTouchCorrection()
+{
+    TArray<FFaceTouchCorrectionBlock>& corrections =
+        getFaceTouchCorrections(selectedHandSide);
+    int32& selectedCorrectionIndex =
+        getSelectedFaceTouchCorrectionIndex(selectedHandSide);
+    if (!corrections.IsValidIndex(selectedCorrectionIndex))
+    {
+        return;
+    }
+
+    const FText correctionName =
+        corrections[selectedCorrectionIndex].getDisplayName();
+    corrections.RemoveAt(selectedCorrectionIndex);
+    selectedCorrectionIndex = INDEX_NONE;
+
+    statusText->SetText(FText::Format(
+        LOCTEXT("FaceTouchCorrectionRemoved", "Removed {0}."),
+        correctionName));
+    rebuildPreviewAnimation(true);
+    refreshTimeline();
+}
+
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)
 {
     playbackController->scrubTo(timeSeconds);
@@ -978,6 +1596,41 @@ void SHandposeTimelineWidget::stepFrame(const int32 frameOffset)
     const int32 lastFrame = FMath::Max(0, animation->GetNumberOfSampledKeys() - 1);
     const int32 targetFrame = FMath::Clamp(currentFrame + frameOffset, 0, lastFrame);
     onPlayheadScrubbed(static_cast<float>(frameRate.AsSeconds(targetFrame)));
+}
+
+void SHandposeTimelineWidget::setTrimStartAtPlayhead()
+{
+    if (!loadedAnimation.IsValid())
+    {
+        return;
+    }
+    trimStartFrame = getCurrentFrame();
+    trimEndFrame = FMath::Max(trimEndFrame, trimStartFrame);
+    applyPlaybackRange();
+    statusText->SetText(FText::Format(
+        LOCTEXT("TrimStartSet", "Trim start set to frame {0}."),
+        FText::AsNumber(trimStartFrame)));
+    refreshTimeline();
+}
+
+void SHandposeTimelineWidget::setTrimEndAtPlayhead()
+{
+    if (!loadedAnimation.IsValid())
+    {
+        return;
+    }
+    trimEndFrame = getCurrentFrame();
+    trimStartFrame = FMath::Min(trimStartFrame, trimEndFrame);
+    applyPlaybackRange();
+    statusText->SetText(FText::Format(
+        LOCTEXT("TrimEndSet", "Trim end set to frame {0}."),
+        FText::AsNumber(trimEndFrame)));
+    refreshTimeline();
+}
+
+void SHandposeTimelineWidget::applyPlaybackRange()
+{
+    playbackController->setPlaybackRange(trimStartFrame, trimEndFrame);
 }
 
 void SHandposeTimelineWidget::onZoomChanged(const float sliderValue)
@@ -1010,11 +1663,20 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
     leftSegments.Reset();
     rightAssignments.Reset();
     leftAssignments.Reset();
+    rightFaceTouchCorrections.Reset();
+    leftFaceTouchCorrections.Reset();
     selectedRightSegmentIndex = INDEX_NONE;
     selectedLeftSegmentIndex = INDEX_NONE;
     selectedRightAssignmentIndex = INDEX_NONE;
     selectedLeftAssignmentIndex = INDEX_NONE;
+    selectedRightFaceTouchCorrectionIndex = INDEX_NONE;
+    selectedLeftFaceTouchCorrectionIndex = INDEX_NONE;
     selectedHandSide = EHandposeSide::Right;
+    trimStartFrame = 0;
+    trimEndFrame = animation != nullptr
+        ? FMath::Max(0, animation->GetNumberOfSampledKeys() - 1)
+        : 0;
+    applyPlaybackRange();
 
     if (animation == nullptr)
     {
@@ -1058,6 +1720,12 @@ void SHandposeTimelineWidget::resetSession()
         pickerWindow->RequestDestroyWindow();
     }
     handshapePickerWindow.Reset();
+    if (const TSharedPtr<SWindow> pickerWindow = faceTouchPointPickerWindow.Pin())
+    {
+        pickerWindow->RequestDestroyWindow();
+    }
+    faceTouchPointPickerWindow.Reset();
+    IFaceTouchCorrectionEditorModule::get().endFacePicking();
 
     playbackController->pause();
     playbackController->setActor(nullptr);
@@ -1068,12 +1736,20 @@ void SHandposeTimelineWidget::resetSession()
     leftSegments.Reset();
     rightAssignments.Reset();
     leftAssignments.Reset();
+    rightFaceTouchCorrections.Reset();
+    leftFaceTouchCorrections.Reset();
     selectedRightSegmentIndex = INDEX_NONE;
     selectedLeftSegmentIndex = INDEX_NONE;
     selectedRightAssignmentIndex = INDEX_NONE;
     selectedLeftAssignmentIndex = INDEX_NONE;
+    selectedRightFaceTouchCorrectionIndex = INDEX_NONE;
+    selectedLeftFaceTouchCorrectionIndex = INDEX_NONE;
     selectedHandSide = EHandposeSide::Right;
     timelineZoom = minimumTimelineZoom;
+    trimStartFrame = 0;
+    trimEndFrame = 0;
+    faceTouchCorrectionModeEnabled = false;
+    pendingFaceTouchFrame = INDEX_NONE;
 
     if (horizontalTimelineScrollBox.IsValid())
     {
@@ -1319,6 +1995,29 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
         return candidates;
     }
 
+    const bool mirrorRightAssetsToLeft = handSide == EHandposeSide::Left;
+    const EHandposeSide matchingSide = mirrorRightAssetsToLeft
+        ? EHandposeSide::Right
+        : handSide;
+    UAnimSequenceBase* matchingAnimation = animation;
+    TStrongObjectPtr<UAnimSequence> remappedMatchingAnimation;
+    if (mirrorRightAssetsToLeft)
+    {
+        const FHandposeMirrorResult remapResult =
+            FHandposeMirrorService::remapAnimationToOppositeHand(
+                Cast<UAnimSequence>(animation),
+                config->getBoneMapping(EHandposeSide::Left),
+                config->getBoneMapping(EHandposeSide::Right),
+                config->getHandposeMirrorFlipAxis());
+        if (!remapResult.success || remapResult.animation == nullptr)
+        {
+            errorMessage = remapResult.errorMessage;
+            return candidates;
+        }
+        remappedMatchingAnimation.Reset(remapResult.animation);
+        matchingAnimation = remapResult.animation;
+    }
+
     TArray<UAnimSequenceBase*> handshapeAnimations;
     TMultiMap<UAnimSequenceBase*, UHandposeAsset*> assetsByPredictionHandpose;
     for (const TSoftObjectPtr<UHandposeAsset>& assetReference : config->getHandposeAssets())
@@ -1328,7 +2027,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
         {
             continue;
         }
-        if (handposeAsset->handSide != handSide)
+        if (handposeAsset->handSide != matchingSide)
         {
             continue;
         }
@@ -1346,7 +2045,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     }
     for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
     {
-        if (handSide != EHandposeSide::Right)
+        if (matchingSide != EHandposeSide::Right)
         {
             break;
         }
@@ -1363,15 +2062,15 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
 
     const FHandshapeMatchingResult matchingResult =
         UHandshapeMatchingBlueprintLibrary::matchSegmentToHandshapes(
-            animation,
+            matchingAnimation,
             segment.startFrame,
             segment.endFrame,
             handshapeAnimations,
             FAnimPoseEvaluationOptions(),
-            config->getSegmentationSettings(handSide),
+            config->getSegmentationSettings(matchingSide),
             config->matchingMethod,
             config->descriptorMethod,
-            config->getBoneMapping(handSide),
+            config->getBoneMapping(matchingSide),
             config->useVirtualLeafBones,
             config->virtualLeafBoneExtensionCm);
     if (!matchingResult.success)
@@ -1403,7 +2102,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
         config->virtualLeafBoneExtensionCm);
     if (config->descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton)
     {
-        const FHandshapeBoneMapping& mapping = config->getBoneMapping(handSide);
+        const FHandshapeBoneMapping& mapping = config->getBoneMapping(matchingSide);
         UE_LOG(
             LogHandposeTimelineRecommendations,
             Display,
@@ -1477,6 +2176,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.displayName = FText::FromName(match.handshapeId);
             candidate.handshapeAnimation = match.handshapeAnimation;
             candidate.handSide = handSide;
+            candidate.mirrorToOppositeHand = mirrorRightAssetsToLeft;
             candidate.matchingDistance = match.distance;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
             continue;
@@ -1490,6 +2190,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
             candidate.previewTexture = handposeAsset->thumbnail;
             candidate.handshapeAnimation = handposeAsset->postProcessedHandpose;
             candidate.handSide = handSide;
+            candidate.mirrorToOppositeHand = mirrorRightAssetsToLeft;
             candidate.matchingDistance = match.distance;
             candidate.relevanceScore = 1.0 / (1.0 + FMath::Max(0.0, match.distance));
         }
@@ -1502,10 +2203,15 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
 {
     UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
     const TArray<FHandposeAssignment> assignments = getAllAssignments();
-    if (sourceAnimation == nullptr || assignments.IsEmpty())
+    TArray<FFaceTouchCorrectionBlock> faceTouchCorrections =
+        rightFaceTouchCorrections;
+    faceTouchCorrections.Append(leftFaceTouchCorrections);
+    if (sourceAnimation == nullptr ||
+        (assignments.IsEmpty() && faceTouchCorrections.IsEmpty()))
     {
         previewAnimation.Reset();
         playbackController->setAnimation(loadedAnimation.Get());
+        applyPlaybackRange();
         return;
     }
 
@@ -1516,21 +2222,50 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     const TArray<FName> leftBoneNames = loadedConfig.IsValid()
         ? loadedConfig->getApplyBoneNames(EHandposeSide::Left)
         : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Left);
-    const FHandposePreviewBuildResult result = FHandposePreviewBuilder::build(
-        sourceAnimation,
-        assignments,
-        rightBoneNames,
-        leftBoneNames);
-    if (!result.success || result.animation == nullptr)
+    UAnimSequence* previewSource = sourceAnimation;
+    if (!assignments.IsEmpty())
     {
-        statusText->SetText(FText::Format(
-            LOCTEXT("PreviewBuildFailed", "Could not build handpose preview: {0}"),
-            FText::FromString(result.errorMessage)));
-        return;
+        const FHandposePreviewBuildResult handposeResult =
+            FHandposePreviewBuilder::build(
+                sourceAnimation,
+                assignments,
+                rightBoneNames,
+                leftBoneNames,
+                loadedConfig->getBoneMapping(EHandposeSide::Right),
+                loadedConfig->getBoneMapping(EHandposeSide::Left),
+                loadedConfig->getHandposeMirrorFlipAxis());
+        if (!handposeResult.success || handposeResult.animation == nullptr)
+        {
+            statusText->SetText(FText::Format(
+                LOCTEXT("PreviewBuildFailed", "Could not build handpose preview: {0}"),
+                FText::FromString(handposeResult.errorMessage)));
+            return;
+        }
+        previewSource = handposeResult.animation;
     }
 
-    previewAnimation.Reset(result.animation);
+    if (!faceTouchCorrections.IsEmpty())
+    {
+        const FHandposePreviewBuildResult faceTouchResult =
+            FFaceTouchPreviewBuilder::applyCorrections(
+                previewSource,
+                playbackController->getActor(),
+                faceTouchCorrections);
+        if (!faceTouchResult.success || faceTouchResult.animation == nullptr)
+        {
+            statusText->SetText(FText::Format(
+                LOCTEXT(
+                    "FaceTouchPreviewBuildFailed",
+                    "Could not build face-touch preview: {0}"),
+                FText::FromString(faceTouchResult.errorMessage)));
+            return;
+        }
+        previewSource = faceTouchResult.animation;
+    }
+
+    previewAnimation.Reset(previewSource);
     playbackController->setAnimation(previewAnimation.Get());
+    applyPlaybackRange();
     if (preserveTime)
     {
         playbackController->scrubTo(FMath::Clamp(
@@ -1610,7 +2345,12 @@ void SHandposeTimelineWidget::refreshTimeline()
             rightAssignments,
             selectedRightSegmentIndex,
             selectedRightAssignmentIndex,
-            timelineZoom);
+            timelineZoom,
+            trimStartFrame,
+            trimEndFrame,
+            faceTouchCorrectionModeEnabled,
+            rightFaceTouchCorrections,
+            selectedRightFaceTouchCorrectionIndex);
     }
     if (leftTimelineTrack.IsValid())
     {
@@ -1620,7 +2360,12 @@ void SHandposeTimelineWidget::refreshTimeline()
             leftAssignments,
             selectedLeftSegmentIndex,
             selectedLeftAssignmentIndex,
-            timelineZoom);
+            timelineZoom,
+            trimStartFrame,
+            trimEndFrame,
+            faceTouchCorrectionModeEnabled,
+            leftFaceTouchCorrections,
+            selectedLeftFaceTouchCorrectionIndex);
     }
 }
 
@@ -1648,6 +2393,22 @@ const TArray<FHandposeAssignment>& SHandposeTimelineWidget::getAssignments(
     return handSide == EHandposeSide::Left ? leftAssignments : rightAssignments;
 }
 
+TArray<FFaceTouchCorrectionBlock>& SHandposeTimelineWidget::getFaceTouchCorrections(
+    const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left
+        ? leftFaceTouchCorrections
+        : rightFaceTouchCorrections;
+}
+
+const TArray<FFaceTouchCorrectionBlock>& SHandposeTimelineWidget::getFaceTouchCorrections(
+    const EHandposeSide handSide) const
+{
+    return handSide == EHandposeSide::Left
+        ? leftFaceTouchCorrections
+        : rightFaceTouchCorrections;
+}
+
 int32& SHandposeTimelineWidget::getSelectedSegmentIndex(const EHandposeSide handSide)
 {
     return handSide == EHandposeSide::Left
@@ -1661,6 +2422,14 @@ int32& SHandposeTimelineWidget::getSelectedAssignmentIndex(
     return handSide == EHandposeSide::Left
         ? selectedLeftAssignmentIndex
         : selectedRightAssignmentIndex;
+}
+
+int32& SHandposeTimelineWidget::getSelectedFaceTouchCorrectionIndex(
+    const EHandposeSide handSide)
+{
+    return handSide == EHandposeSide::Left
+        ? selectedLeftFaceTouchCorrectionIndex
+        : selectedRightFaceTouchCorrectionIndex;
 }
 
 TArray<FHandposeAssignment> SHandposeTimelineWidget::getAllAssignments() const
@@ -1845,6 +2614,30 @@ FText SHandposeTimelineWidget::getTimecodeText() const
         minutes,
         seconds,
         frames));
+}
+
+FText SHandposeTimelineWidget::getTrimRangeText() const
+{
+    return loadedAnimation.IsValid()
+        ? FText::Format(
+            LOCTEXT("TrimRange", "Trim: {0}-{1}  ([ / ])"),
+            FText::AsNumber(trimStartFrame),
+            FText::AsNumber(trimEndFrame))
+        : LOCTEXT("NoTrimRange", "Trim: --");
+}
+
+int32 SHandposeTimelineWidget::getCurrentFrame() const
+{
+    const UAnimSequenceBase* animation = loadedAnimation.Get();
+    if (animation == nullptr || !animation->GetSamplingFrameRate().IsValid())
+    {
+        return 0;
+    }
+    return FMath::Clamp(
+        FMath::RoundToInt(
+            getCurrentTimeSeconds() * animation->GetSamplingFrameRate().AsDecimal()),
+        0,
+        FMath::Max(0, animation->GetNumberOfSampledKeys() - 1));
 }
 
 TArray<FName> SHandposeTimelineWidget::getSegmentationBoneNames(

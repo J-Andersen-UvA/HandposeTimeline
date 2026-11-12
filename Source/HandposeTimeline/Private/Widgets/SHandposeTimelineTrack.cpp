@@ -19,6 +19,9 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
     onAssignmentSelected = arguments._OnAssignmentSelected;
     onAssignmentChanged = arguments._OnAssignmentChanged;
     onAssignmentFingerEditRequested = arguments._OnAssignmentFingerEditRequested;
+    onFaceTouchCorrectionSelected = arguments._OnFaceTouchCorrectionSelected;
+    onFaceTouchCorrectionChanged = arguments._OnFaceTouchCorrectionChanged;
+    onFaceTouchCorrectionEditRequested = arguments._OnFaceTouchCorrectionEditRequested;
 
     ChildSlot
     [
@@ -75,6 +78,34 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                             this,
                             &SHandposeTimelineTrack::handleAssignmentChanged)
                     ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SAssignNew(faceTouchCorrectionContainer, SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(1.0f, 8.0f, 0.0f, 4.0f)
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("FaceTouchCorrections", "Face Touch Corrections"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SAssignNew(faceTouchCorrectionLane, SFaceTouchCorrectionLane)
+                            .OnCorrectionSelected(
+                                this,
+                                &SHandposeTimelineTrack::handleFaceTouchCorrectionSelected)
+                            .OnCorrectionChanged(
+                                this,
+                                &SHandposeTimelineTrack::handleFaceTouchCorrectionChanged)
+                            .OnCorrectionEditRequested(
+                                this,
+                                &SHandposeTimelineTrack::handleFaceTouchCorrectionEditRequested)
+                        ]
+                    ]
                 ]
                 + SOverlay::Slot()
                 [
@@ -93,7 +124,12 @@ void SHandposeTimelineTrack::setTimeline(
     const TArray<FHandposeAssignment>& assignments,
     const int32 newSelectedSegmentIndex,
     const int32 selectedAssignmentIndex,
-    const float zoom)
+    const float zoom,
+    const int32 trimStartFrame,
+    const int32 trimEndFrame,
+    const bool faceTouchCorrectionModeEnabled,
+    const TArray<FFaceTouchCorrectionBlock>& faceTouchCorrections,
+    const int32 selectedFaceTouchCorrectionIndex)
 {
     selectedSegmentIndex = newSelectedSegmentIndex;
     highlightedSegmentIndices.Reset();
@@ -111,7 +147,12 @@ void SHandposeTimelineTrack::setTimeline(
     }
     if (playheadOverlay.IsValid())
     {
-        playheadOverlay->setTimeline(animation, segments, zoom);
+        playheadOverlay->setTimeline(
+            animation,
+            segments,
+            zoom,
+            trimStartFrame,
+            trimEndFrame);
     }
     if (assignmentLane.IsValid())
     {
@@ -120,6 +161,21 @@ void SHandposeTimelineTrack::setTimeline(
             segments,
             assignments,
             selectedAssignmentIndex,
+            zoom);
+    }
+    if (faceTouchCorrectionContainer.IsValid())
+    {
+        faceTouchCorrectionContainer->SetVisibility(
+            faceTouchCorrectionModeEnabled
+                ? EVisibility::Visible
+                : EVisibility::Collapsed);
+    }
+    if (faceTouchCorrectionLane.IsValid())
+    {
+        faceTouchCorrectionLane->setTimeline(
+            animation,
+            faceTouchCorrections,
+            selectedFaceTouchCorrectionIndex,
             zoom);
     }
     rebuild();
@@ -152,6 +208,30 @@ void SHandposeTimelineTrack::handleAssignmentFingerEditRequested(
     const int32 assignmentIndex)
 {
     onAssignmentFingerEditRequested.ExecuteIfBound(handSide, assignmentIndex);
+}
+
+void SHandposeTimelineTrack::handleFaceTouchCorrectionSelected(
+    const int32 correctionIndex)
+{
+    onFaceTouchCorrectionSelected.ExecuteIfBound(handSide, correctionIndex);
+}
+
+void SHandposeTimelineTrack::handleFaceTouchCorrectionChanged(
+    const int32 correctionIndex,
+    const FFaceTouchCorrectionBlock& correction,
+    const bool isFinal)
+{
+    onFaceTouchCorrectionChanged.ExecuteIfBound(
+        handSide,
+        correctionIndex,
+        correction,
+        isFinal);
+}
+
+void SHandposeTimelineTrack::handleFaceTouchCorrectionEditRequested(
+    const int32 correctionIndex)
+{
+    onFaceTouchCorrectionEditRequested.ExecuteIfBound(handSide, correctionIndex);
 }
 
 void SHandposeTimelineTrack::onPlayheadScrubbed(const float timeSeconds)

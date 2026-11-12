@@ -19,5 +19,7 @@ public:
     static FHandposeBakeResult bake(
         UAnimSequence* previewAnimation,
         const UAnimSequence* sourceAnimation,
-        const FString& outputRoot);
+        const FString& outputRoot,
+        int32 trimStartFrame,
+        int32 trimEndFrame);
 };

@@ -29,6 +29,9 @@ struct HANDPOSETIMELINE_API FHandposeAssignment
     EHandposeSide handSide = EHandposeSide::Right;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
+    bool mirrorToOppositeHand = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Handpose Timeline")
     TArray<EHandposeFinger> skippedFingers;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Handpose Timeline")

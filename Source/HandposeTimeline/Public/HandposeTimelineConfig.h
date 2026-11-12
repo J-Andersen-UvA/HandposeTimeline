@@ -10,6 +10,15 @@
 class UAnimSequence;
 class UHandposeAsset;
 
+UENUM(BlueprintType)
+enum class EHandposeMirrorFlipAxis : uint8
+{
+    None,
+    X,
+    Y,
+    Z
+};
+
 USTRUCT(BlueprintType)
 struct HANDPOSETIMELINE_API FHandposeSegmentationParameters
 {
@@ -62,6 +71,9 @@ public:
         Category = "Handshapes|Bone Mapping",
         meta = (EditCondition = "descriptorMethod == EHandshapeDescriptorMethod::HandSkeleton", EditConditionHides))
     FHandshapeBoneMapping leftHandBoneMapping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes|Mirroring")
+    EHandposeMirrorFlipAxis handposeMirrorFlipAxis = EHandposeMirrorFlipAxis::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Handshapes|Apply Bones")
     TArray<FName> rightHandApplyBoneNames;
@@ -132,6 +144,7 @@ public:
     FHandshapeSegmentationSettings getSegmentationSettings() const;
     FHandshapeSegmentationSettings getSegmentationSettings(EHandposeSide handSide) const;
     const FHandshapeBoneMapping& getBoneMapping(EHandposeSide handSide) const;
+    EAxis::Type getHandposeMirrorFlipAxis() const;
     TArray<FName> getConfiguredBoneNames(EHandposeSide handSide) const;
     TArray<FName> getApplyBoneNames(EHandposeSide handSide) const;
     TArray<FName> getLeafBoneNames(EHandposeSide handSide) const;

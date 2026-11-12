@@ -227,9 +227,13 @@ void SHandposeTimelinePlayheadOverlay::Construct(const FArguments& arguments)
 void SHandposeTimelinePlayheadOverlay::setTimeline(
     UAnimSequenceBase* newAnimation,
     const TArray<FHandposeTimelineSegment>& segments,
-    const float zoom)
+    const float zoom,
+    const int32 newTrimStartFrame,
+    const int32 newTrimEndFrame)
 {
     animation = newAnimation;
+    trimStartFrame = newTrimStartFrame;
+    trimEndFrame = newTrimEndFrame;
     layout.setTimeline(newAnimation, segments, zoom);
     Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
@@ -253,6 +257,58 @@ int32 SHandposeTimelinePlayheadOverlay::OnPaint(
     {
         return layerId;
     }
+    const ESlateDrawEffect drawEffects = parentEnabled
+        ? ESlateDrawEffect::None
+        : ESlateDrawEffect::DisabledEffect;
+    const FSlateBrush* brush = FAppStyle::GetBrush(TEXT("WhiteBrush"));
+    const float height = allottedGeometry.GetLocalSize().Y;
+    const int32 lastFrame = layout.getLastFrame();
+    const int32 clampedStartFrame = FMath::Clamp(trimStartFrame, 0, lastFrame);
+    const int32 clampedEndFrame = FMath::Clamp(trimEndFrame, clampedStartFrame, lastFrame);
+    const float trimStartX = layout.getOffsetAtFrame(clampedStartFrame);
+    const float trimEndX = clampedEndFrame < lastFrame
+        ? layout.getOffsetAtFrame(clampedEndFrame + 1)
+        : layout.getTotalWidth();
+    if (trimStartX > 0.0f)
+    {
+        FSlateDrawElement::MakeBox(
+            outDrawElements,
+            layerId,
+            allottedGeometry.ToPaintGeometry(
+                FVector2D(trimStartX, height),
+                FSlateLayoutTransform()),
+            brush,
+            drawEffects,
+            FLinearColor(0.015f, 0.015f, 0.015f, 0.68f));
+    }
+    if (trimEndX < layout.getTotalWidth())
+    {
+        FSlateDrawElement::MakeBox(
+            outDrawElements,
+            layerId,
+            allottedGeometry.ToPaintGeometry(
+                FVector2D(layout.getTotalWidth() - trimEndX, height),
+                FSlateLayoutTransform(FVector2D(trimEndX, 0.0f))),
+            brush,
+            drawEffects,
+            FLinearColor(0.015f, 0.015f, 0.015f, 0.68f));
+    }
+    for (const float boundaryX : {trimStartX, trimEndX})
+    {
+        TArray<FVector2D> boundaryPoints = {
+            FVector2D(boundaryX, 0.0f),
+            FVector2D(boundaryX, height)
+        };
+        FSlateDrawElement::MakeLines(
+            outDrawElements,
+            layerId + 1,
+            allottedGeometry.ToPaintGeometry(),
+            boundaryPoints,
+            drawEffects,
+            FLinearColor(0.15f, 0.58f, 0.92f, 0.9f),
+            true,
+            1.5f);
+    }
     const int32 currentFrame = FMath::Clamp(
         FMath::RoundToInt(
             currentTimeSeconds.Get(0.0f) *
@@ -266,12 +322,12 @@ int32 SHandposeTimelinePlayheadOverlay::OnPaint(
     };
     FSlateDrawElement::MakeLines(
         outDrawElements,
-        layerId,
+        layerId + 2,
         allottedGeometry.ToPaintGeometry(),
         linePoints,
-        parentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
+        drawEffects,
         FLinearColor(0.88f, 0.88f, 0.88f, 0.82f),
         true,
         1.0f);
-    return layerId + 1;
+    return layerId + 3;
 }

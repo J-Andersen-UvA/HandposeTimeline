@@ -63,6 +63,10 @@ void SHandshapeTileWidget::Construct(const FArguments& arguments)
                 SNew(SBox)
                 .WidthOverride(128.0f)
                 .HeightOverride(128.0f)
+                .RenderTransform(candidate.IsValid() && candidate->mirrorToOppositeHand
+                    ? FSlateRenderTransform(FScale2D(-1.0f, 1.0f))
+                    : FSlateRenderTransform())
+                .RenderTransformPivot(FVector2D(0.5f, 0.5f))
                 [
                     previewWidget
                 ]

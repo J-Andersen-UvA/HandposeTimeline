@@ -1,18 +1,10 @@
 #include "HandshapeSegmentationBridge.h"
 
-#include "matching/poseshape.h"
 #include "matching/handshape.h"
-#include "math/math.h"
+#include "matching/handskeleton.h"
+#include "lib/math/math.h"
 
-HandSkeleton get_average_handskeleton_from_segment(
-    const std::vector<JointLocationTrack>& tracks,
-    const Segment& segment,
-    const json& bone_mapping,
-    bool take_middle_50_percent);
-std::vector<Match> match_Handskeletons(
-    const std::vector<HandSkeleton>& handskeletons,
-    const HandSkeleton& input_handskeleton,
-    MatchingMethod method);
+#include <algorithm>
 
 namespace
 {
@@ -59,6 +51,45 @@ MatchingMethod toUpstreamMatchingMethod(
     case handshapeSegmentationBridge::MatchingMethod::Euclidean:
     default:
         return MatchingMethod::Euclidean;
+    }
+}
+
+std::vector<double> toJointRotationDescriptor(const Pose& pose)
+{
+    std::vector<double> descriptor;
+    descriptor.reserve(pose.joints.size());
+    for (const Eigen::Quaterniond& rotation : pose.joints)
+    {
+        descriptor.push_back(
+            rotation.toRotationMatrix().eulerAngles(0, 1, 2).x());
+    }
+    return descriptor;
+}
+
+double poseDistance(
+    const Pose& left,
+    const Pose& right,
+    const MatchingMethod method)
+{
+    const std::vector<double> leftDescriptor =
+        toJointRotationDescriptor(left);
+    const std::vector<double> rightDescriptor =
+        toJointRotationDescriptor(right);
+    switch (method)
+    {
+    case MatchingMethod::Cosine:
+        return 1.0 - math::Math::get_cosine_similarity(
+            leftDescriptor,
+            rightDescriptor);
+    case MatchingMethod::Manhattan:
+        return math::Math::get_manhattan_distance(
+            leftDescriptor,
+            rightDescriptor);
+    case MatchingMethod::Euclidean:
+    default:
+        return math::Math::get_euclidean_distance(
+            leftDescriptor,
+            rightDescriptor);
     }
 }
 
@@ -202,11 +233,28 @@ handshapeSegmentationBridge::matchPoses(
         upstreamHandshapes.push_back(toUpstreamPose(handshape));
     }
 
-    const std::vector<::Match> upstreamMatches =
-        poseshape::Poseshape::match_poses(
-            upstreamHandshapes,
-            toUpstreamPose(inputPose),
-            toUpstreamMatchingMethod(method));
+    const ::Pose upstreamInputPose = toUpstreamPose(inputPose);
+    const ::MatchingMethod upstreamMethod = toUpstreamMatchingMethod(method);
+    std::vector<::Match> upstreamMatches;
+    upstreamMatches.reserve(upstreamHandshapes.size());
+    for (size_t handshapeIndex = 0;
+         handshapeIndex < upstreamHandshapes.size();
+         ++handshapeIndex)
+    {
+        upstreamMatches.push_back({
+            static_cast<int>(handshapeIndex),
+            poseDistance(
+                upstreamHandshapes[handshapeIndex],
+                upstreamInputPose,
+                upstreamMethod)});
+    }
+    std::sort(
+        upstreamMatches.begin(),
+        upstreamMatches.end(),
+        [](const ::Match& left, const ::Match& right)
+        {
+            return left.distance < right.distance;
+        });
 
     std::vector<handshapeSegmentationBridge::Match> matches;
     matches.reserve(upstreamMatches.size());
@@ -233,7 +281,7 @@ handshapeSegmentationBridge::matchHandSkeletonTracks(
     {
         const std::vector<JointLocationTrack> tracks =
             toUpstreamLocationTracks(handshape);
-        upstreamHandshapes.push_back(get_average_handskeleton_from_segment(
+        upstreamHandshapes.push_back(handskel::Handskel::get_average_handskeleton_from_segment(
             tracks,
             {0, static_cast<int>(handshape.frames.size()) - 1},
             boneMapping,
@@ -242,7 +290,7 @@ handshapeSegmentationBridge::matchHandSkeletonTracks(
 
     const std::vector<JointLocationTrack> inputTracks =
         toUpstreamLocationTracks(inputTrack);
-    const ::HandSkeleton inputSkeleton = get_average_handskeleton_from_segment(
+    const ::HandSkeleton inputSkeleton = handskel::Handskel::get_average_handskeleton_from_segment(
         inputTracks,
         {inputStartFrame, inputEndFrame},
         boneMapping,
@@ -259,7 +307,7 @@ handshapeSegmentationBridge::matchHandSkeletonTracks(
                 handshape::Handshape::compute_handshape_representation(handshape));
         }
     }
-    const std::vector<::Match> upstreamMatches = match_Handskeletons(
+    const std::vector<::Match> upstreamMatches = handskel::Handskel::match_handskeletons(
         upstreamHandshapes,
         inputSkeleton,
         toUpstreamMatchingMethod(method));

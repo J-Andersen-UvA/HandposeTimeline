@@ -72,7 +72,9 @@ public:
     void setTimeline(
         UAnimSequenceBase* animation,
         const TArray<FHandposeTimelineSegment>& segments,
-        float zoom);
+        float zoom,
+        int32 trimStartFrame,
+        int32 trimEndFrame);
 
     virtual FVector2D ComputeDesiredSize(float layoutScaleMultiplier) const override;
     virtual bool ComputeVolatility() const override
@@ -92,4 +94,6 @@ private:
     FHandposeTimelineLayout layout;
     TWeakObjectPtr<UAnimSequenceBase> animation;
     TAttribute<float> currentTimeSeconds;
+    int32 trimStartFrame = 0;
+    int32 trimEndFrame = 0;
 };

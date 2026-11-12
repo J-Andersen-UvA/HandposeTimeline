@@ -1,6 +1,7 @@
 #include "Baking/HandposeBakeService.h"
 
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimSequenceHelpers.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EditorAssetLibrary.h"
 #include "Misc/DateTime.h"
@@ -11,7 +12,9 @@
 FHandposeBakeResult FHandposeBakeService::bake(
     UAnimSequence* previewAnimation,
     const UAnimSequence* sourceAnimation,
-    const FString& outputRoot)
+    const FString& outputRoot,
+    const int32 trimStartFrame,
+    const int32 trimEndFrame)
 {
     FHandposeBakeResult result;
     if (previewAnimation == nullptr || sourceAnimation == nullptr)
@@ -88,6 +91,27 @@ FHandposeBakeResult FHandposeBakeService::bake(
     }
     outputAnimation->ClearFlags(RF_Transient);
     outputAnimation->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
+
+    const int32 lastFrame = FMath::Max(0, outputAnimation->GetNumberOfSampledKeys() - 1);
+    const int32 clampedStartFrame = FMath::Clamp(trimStartFrame, 0, lastFrame);
+    const int32 clampedEndFrame = FMath::Clamp(trimEndFrame, clampedStartFrame, lastFrame);
+    if (clampedEndFrame < lastFrame)
+    {
+        UE::Anim::AnimationData::Trim(
+            outputAnimation,
+            TRange<FFrameNumber>(
+                TRangeBound<FFrameNumber>::Inclusive(clampedEndFrame + 1),
+                TRangeBound<FFrameNumber>::Exclusive(lastFrame + 1)));
+    }
+    if (clampedStartFrame > 0)
+    {
+        UE::Anim::AnimationData::Trim(
+            outputAnimation,
+            TRange<FFrameNumber>(
+                TRangeBound<FFrameNumber>::Inclusive(0),
+                TRangeBound<FFrameNumber>::Exclusive(clampedStartFrame)));
+    }
+
     outputAnimation->MarkPackageDirty();
     outputAnimation->PostEditChange();
     FAssetRegistryModule::AssetCreated(outputAnimation);

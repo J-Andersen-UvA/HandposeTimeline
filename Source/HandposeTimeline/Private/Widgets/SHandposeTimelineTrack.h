@@ -1,12 +1,15 @@
 #pragma once
 
+#include "FaceTouchCorrectionTypes.h"
 #include "HandposeAsset.h"
+#include "SFaceTouchCorrectionLane.h"
 #include "Timeline/HandposeTimelineLayout.h"
 #include "Widgets/SHandposeAssignmentLane.h"
 #include "Widgets/SHandposeTimelineRuler.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SHorizontalBox;
+class SVerticalBox;
 class UAnimSequenceBase;
 
 DECLARE_DELEGATE_TwoParams(
@@ -28,6 +31,20 @@ DECLARE_DELEGATE_TwoParams(
     FOnHandposeTimelineAssignmentFingerEditRequested,
     EHandposeSide,
     int32)
+DECLARE_DELEGATE_TwoParams(
+    FOnHandposeTimelineFaceTouchCorrectionSelected,
+    EHandposeSide,
+    int32)
+DECLARE_DELEGATE_FourParams(
+    FOnHandposeTimelineFaceTouchCorrectionChanged,
+    EHandposeSide,
+    int32,
+    const FFaceTouchCorrectionBlock&,
+    bool)
+DECLARE_DELEGATE_TwoParams(
+    FOnHandposeTimelineFaceTouchCorrectionEditRequested,
+    EHandposeSide,
+    int32)
 
 class SHandposeTimelineTrack : public SCompoundWidget
 {
@@ -46,6 +63,15 @@ public:
         SLATE_EVENT(
             FOnHandposeTimelineAssignmentFingerEditRequested,
             OnAssignmentFingerEditRequested)
+        SLATE_EVENT(
+            FOnHandposeTimelineFaceTouchCorrectionSelected,
+            OnFaceTouchCorrectionSelected)
+        SLATE_EVENT(
+            FOnHandposeTimelineFaceTouchCorrectionChanged,
+            OnFaceTouchCorrectionChanged)
+        SLATE_EVENT(
+            FOnHandposeTimelineFaceTouchCorrectionEditRequested,
+            OnFaceTouchCorrectionEditRequested)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& arguments);
@@ -55,7 +81,12 @@ public:
         const TArray<FHandposeAssignment>& assignments,
         int32 selectedSegmentIndex,
         int32 selectedAssignmentIndex,
-        float zoom);
+        float zoom,
+        int32 trimStartFrame,
+        int32 trimEndFrame,
+        bool faceTouchCorrectionModeEnabled,
+        const TArray<FFaceTouchCorrectionBlock>& faceTouchCorrections,
+        int32 selectedFaceTouchCorrectionIndex);
 
 private:
     FReply onSegmentClicked(int32 segmentIndex);
@@ -65,6 +96,12 @@ private:
         const FHandposeAssignment& assignment,
         bool isFinal);
     void handleAssignmentFingerEditRequested(int32 assignmentIndex);
+    void handleFaceTouchCorrectionSelected(int32 correctionIndex);
+    void handleFaceTouchCorrectionChanged(
+        int32 correctionIndex,
+        const FFaceTouchCorrectionBlock& correction,
+        bool isFinal);
+    void handleFaceTouchCorrectionEditRequested(int32 correctionIndex);
     void onPlayheadScrubbed(float timeSeconds);
     void rebuild();
     TSharedRef<SWidget> createSegmentWidget(
@@ -78,11 +115,16 @@ private:
     FOnHandposeTimelineAssignmentSelected onAssignmentSelected;
     FOnHandposeTimelineAssignmentChanged onAssignmentChanged;
     FOnHandposeTimelineAssignmentFingerEditRequested onAssignmentFingerEditRequested;
+    FOnHandposeTimelineFaceTouchCorrectionSelected onFaceTouchCorrectionSelected;
+    FOnHandposeTimelineFaceTouchCorrectionChanged onFaceTouchCorrectionChanged;
+    FOnHandposeTimelineFaceTouchCorrectionEditRequested onFaceTouchCorrectionEditRequested;
     EHandposeSide handSide = EHandposeSide::Right;
     int32 selectedSegmentIndex = INDEX_NONE;
     TSet<int32> highlightedSegmentIndices;
     TSharedPtr<SHorizontalBox> blockContainer;
     TSharedPtr<SHandposeAssignmentLane> assignmentLane;
+    TSharedPtr<SVerticalBox> faceTouchCorrectionContainer;
+    TSharedPtr<SFaceTouchCorrectionLane> faceTouchCorrectionLane;
     TSharedPtr<SHandposeTimelineRuler> frameRuler;
     TSharedPtr<SHandposeTimelinePlayheadOverlay> playheadOverlay;
 };

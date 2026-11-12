@@ -15,6 +15,8 @@ public:
     virtual void resetSession() = 0;
     virtual bool canBakeCurrentAnimation() const = 0;
     virtual bool hasAssignments() const = 0;
+    virtual bool hasCustomPlaybackRange() const = 0;
+    virtual void getPlaybackRange(int32& startFrame, int32& endFrame) const = 0;
     virtual bool bakeCurrentAnimation(
         UAnimSequence*& outputAnimation,
         FString& outputPath,
@@ -32,6 +34,8 @@ public:
     virtual void resetSession() override;
     virtual bool canBakeCurrentAnimation() const override;
     virtual bool hasAssignments() const override;
+    virtual bool hasCustomPlaybackRange() const override;
+    virtual void getPlaybackRange(int32& startFrame, int32& endFrame) const override;
     virtual bool bakeCurrentAnimation(
         UAnimSequence*& outputAnimation,
         FString& outputPath,

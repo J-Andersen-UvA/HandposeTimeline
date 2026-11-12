@@ -102,7 +102,7 @@ private:
         float offsetDelta);
     void onFaceSurfaceClicked(const FFaceTouchSurfaceLocation& surfaceLocation);
     void onFaceTouchPointsChosen(const TArray<FName>& pointIds);
-    TArray<FName> getFaceTouchPointIds(EHandposeSide handSide) const;
+    TArray<FName> getFaceTouchPointIds() const;
     void removeSelectedAssignment();
     void removeSelectedFaceTouchCorrection();
     void onPlayheadScrubbed(float timeSeconds);

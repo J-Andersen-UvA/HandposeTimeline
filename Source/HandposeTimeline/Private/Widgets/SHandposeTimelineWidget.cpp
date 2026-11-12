@@ -1375,15 +1375,14 @@ void SHandposeTimelineWidget::onFaceSurfaceClicked(
     const FFaceTouchSurfaceLocation& surfaceLocation)
 {
     pendingFaceTouchSurfaceLocation = surfaceLocation;
-    pendingFaceTouchHandSide = selectedHandSide;
     pendingFaceTouchFrame = getCurrentFrame();
 
-    const TArray<FName> pointIds = getFaceTouchPointIds(selectedHandSide);
+    const TArray<FName> pointIds = getFaceTouchPointIds();
     if (pointIds.IsEmpty())
     {
         statusText->SetText(LOCTEXT(
             "NoFaceTouchPoints",
-            "The selected actor has no interaction points for the selected hand."));
+            "The selected actor has no left- or right-hand interaction points."));
         return;
     }
 
@@ -1428,6 +1427,40 @@ void SHandposeTimelineWidget::onFaceTouchPointsChosen(
     {
         return;
     }
+
+    TOptional<EHandposeSide> pointHandSide;
+    for (const FName pointId : pointIds)
+    {
+        const FString pointName = pointId.ToString();
+        const TOptional<EHandposeSide> currentSide =
+            pointName.StartsWith(TEXT("left"), ESearchCase::IgnoreCase)
+                ? TOptional<EHandposeSide>(EHandposeSide::Left)
+                : pointName.StartsWith(TEXT("right"), ESearchCase::IgnoreCase)
+                    ? TOptional<EHandposeSide>(EHandposeSide::Right)
+                    : TOptional<EHandposeSide>();
+        if (!currentSide.IsSet())
+        {
+            continue;
+        }
+        if (pointHandSide.IsSet() && pointHandSide.GetValue() != currentSide.GetValue())
+        {
+            statusText->SetText(LOCTEXT(
+                "MixedFaceTouchHands",
+                "Create separate face-touch corrections for the left and right hands."));
+            pendingFaceTouchFrame = INDEX_NONE;
+            return;
+        }
+        pointHandSide = currentSide;
+    }
+    if (!pointHandSide.IsSet())
+    {
+        statusText->SetText(LOCTEXT(
+            "UnknownFaceTouchHand",
+            "The selected interaction points do not identify a left or right hand."));
+        pendingFaceTouchFrame = INDEX_NONE;
+        return;
+    }
+    pendingFaceTouchHandSide = pointHandSide.GetValue();
 
     const int32 lastFrame = FMath::Max(0, animation->GetNumberOfSampledKeys() - 1);
     int32 approachZeroFrame = FMath::Max(0, pendingFaceTouchFrame - 10);
@@ -1483,8 +1516,7 @@ void SHandposeTimelineWidget::onFaceTouchPointsChosen(
     refreshTimeline();
 }
 
-TArray<FName> SHandposeTimelineWidget::getFaceTouchPointIds(
-    const EHandposeSide handSide) const
+TArray<FName> SHandposeTimelineWidget::getFaceTouchPointIds() const
 {
     TArray<FName> pointIds;
     AActor* actor = playbackController->getActor();
@@ -1495,13 +1527,15 @@ TArray<FName> SHandposeTimelineWidget::getFaceTouchPointIds(
 
     TArray<USemanticInteractionPointComponent*> pointComponents;
     actor->GetComponents(pointComponents);
-    const FString sidePrefix = handSide == EHandposeSide::Left
-        ? TEXT("left")
-        : TEXT("right");
     for (const USemanticInteractionPointComponent* point : pointComponents)
     {
-        if (point != nullptr &&
-            point->pointId.ToString().StartsWith(sidePrefix, ESearchCase::IgnoreCase))
+        if (point == nullptr)
+        {
+            continue;
+        }
+        const FString pointName = point->pointId.ToString();
+        if (pointName.StartsWith(TEXT("left"), ESearchCase::IgnoreCase) ||
+            pointName.StartsWith(TEXT("right"), ESearchCase::IgnoreCase))
         {
             pointIds.AddUnique(point->pointId);
         }

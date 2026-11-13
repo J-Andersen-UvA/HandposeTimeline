@@ -12,6 +12,38 @@ constexpr float clipHeight = 58.0f;
 constexpr float handleRadius = 7.0f;
 constexpr float edgeHitWidth = 7.0f;
 constexpr int32 curveSampleCount = 32;
+
+void paintTriangle(
+    const FVector2D& first,
+    const FVector2D& second,
+    const FVector2D& third,
+    const FGeometry& geometry,
+    const FLinearColor& color,
+    const FSlateBrush& brush,
+    FSlateWindowElementList& drawElements,
+    const int32 layerId,
+    const ESlateDrawEffect drawEffects)
+{
+    TArray<FSlateVertex> vertices;
+    vertices.Reserve(3);
+    for (const FVector2D& point : {first, second, third})
+    {
+        FSlateVertex& vertex = vertices.AddDefaulted_GetRef();
+        vertex.Position = FVector2f(geometry.LocalToAbsolute(point));
+        vertex.Color = color.ToFColor(false);
+    }
+    const TArray<SlateIndex> indices = {0, 1, 2};
+    FSlateDrawElement::MakeCustomVerts(
+        drawElements,
+        layerId,
+        brush.GetRenderingResource(),
+        vertices,
+        indices,
+        nullptr,
+        0,
+        0,
+        drawEffects);
+}
 }
 
 void SHandposeAssignmentLane::Construct(const FArguments& arguments)
@@ -177,29 +209,52 @@ int32 SHandposeAssignmentLane::OnPaint(
 
         const float fullStart = getFrameOffset(assignment.fullPoseStartFrame);
         const float fullEnd = getFrameOffset(assignment.fullPoseEndFrame, true);
-        for (const float handleX : {fullStart, fullEnd})
+        for (const TPair<float, EDragTarget>& handle : {
+                 TPair<float, EDragTarget>(fullStart, EDragTarget::FullPoseStart),
+                 TPair<float, EDragTarget>(fullEnd, EDragTarget::FullPoseEnd)})
         {
-            FSlateDrawElement::MakeBox(
+            const bool isHovered = hoveredHit.assignmentIndex == assignmentIndex &&
+                hoveredHit.target == handle.Value;
+            const float handleSize = isHovered ? 10.0f : 8.0f;
+            const float halfSize = handleSize * 0.5f;
+            const bool pointsLeft = handle.Value == EDragTarget::FullPoseStart;
+            const FVector2D tip(
+                handle.Key + (pointsLeft ? -halfSize : halfSize),
+                halfSize);
+            const float baseX = handle.Key + (pointsLeft ? halfSize : -halfSize);
+            paintTriangle(
+                tip,
+                FVector2D(baseX, 0.0f),
+                FVector2D(baseX, handleSize),
+                allottedGeometry,
+                isHovered
+                    ? FLinearColor(0.96f, 0.96f, 1.0f, 1.0f)
+                    : FLinearColor(0.86f, 0.86f, 0.9f, 1.0f),
+                *brush,
                 outDrawElements,
                 layerId + 5,
-                allottedGeometry.ToPaintGeometry(
-                    FVector2D(8.0f, 8.0f),
-                    FSlateLayoutTransform(FVector2D(handleX - 4.0f, 0.0f))),
-                brush,
-                drawEffects,
-                FLinearColor(0.86f, 0.86f, 0.9f, 1.0f));
+                drawEffects);
         }
-        for (const float edgeX : {left, right})
+        for (const TPair<float, EDragTarget>& edge : {
+                 TPair<float, EDragTarget>(left, EDragTarget::BlendStart),
+                 TPair<float, EDragTarget>(right, EDragTarget::BlendEnd)})
         {
+            const bool isHovered = hoveredHit.assignmentIndex == assignmentIndex &&
+                hoveredHit.target == edge.Value;
+            const float edgeWidth = isHovered ? 3.0f : 2.0f;
             FSlateDrawElement::MakeBox(
                 outDrawElements,
                 layerId + 5,
                 allottedGeometry.ToPaintGeometry(
-                    FVector2D(2.0f, clipHeight),
-                    FSlateLayoutTransform(FVector2D(edgeX - 1.0f, 0.0f))),
+                    FVector2D(edgeWidth, clipHeight),
+                    FSlateLayoutTransform(FVector2D(
+                        edge.Key - edgeWidth * 0.5f,
+                        0.0f))),
                 brush,
                 drawEffects,
-                FLinearColor(0.8f, 0.8f, 0.84f, 1.0f));
+                isHovered
+                    ? FLinearColor(0.94f, 0.94f, 0.98f, 1.0f)
+                    : FLinearColor(0.8f, 0.8f, 0.84f, 1.0f));
         }
     }
     return layerId + 6;
@@ -234,6 +289,7 @@ FReply SHandposeAssignmentLane::OnMouseButtonDown(
 
     draggedAssignmentIndex = hit.assignmentIndex;
     dragTarget = hit.target;
+    hoveredHit = hit;
     assignmentAtDragStart = assignments[hit.assignmentIndex];
     cursorFrameAtDragStart = FMath::RoundToInt(
         layout.getFrameAtOffset(localPosition.X));
@@ -244,12 +300,21 @@ FReply SHandposeAssignmentLane::OnMouseMove(
     const FGeometry& myGeometry,
     const FPointerEvent& mouseEvent)
 {
+    const FVector2D localPosition = myGeometry.AbsoluteToLocal(
+        mouseEvent.GetScreenSpacePosition());
     if (!HasMouseCapture() || !assignments.IsValidIndex(draggedAssignmentIndex))
     {
+        const FHitResult newHoveredHit = hitTest(localPosition.X, localPosition.Y);
+        if (newHoveredHit.assignmentIndex != hoveredHit.assignmentIndex ||
+            newHoveredHit.target != hoveredHit.target)
+        {
+            hoveredHit = newHoveredHit;
+            Invalidate(EInvalidateWidgetReason::Paint);
+        }
         return FReply::Unhandled();
     }
     updateDrag(
-        myGeometry.AbsoluteToLocal(mouseEvent.GetScreenSpacePosition()).X,
+        localPosition.X,
         false);
     return FReply::Handled();
 }
@@ -267,7 +332,21 @@ FReply SHandposeAssignmentLane::OnMouseButtonUp(
         true);
     draggedAssignmentIndex = INDEX_NONE;
     dragTarget = EDragTarget::None;
+    const FVector2D localPosition = myGeometry.AbsoluteToLocal(
+        mouseEvent.GetScreenSpacePosition());
+    hoveredHit = hitTest(localPosition.X, localPosition.Y);
+    Invalidate(EInvalidateWidgetReason::Paint);
     return FReply::Handled().ReleaseMouseCapture();
+}
+
+void SHandposeAssignmentLane::OnMouseLeave(const FPointerEvent& mouseEvent)
+{
+    SLeafWidget::OnMouseLeave(mouseEvent);
+    if (!HasMouseCapture() && hoveredHit.assignmentIndex != INDEX_NONE)
+    {
+        hoveredHit = {};
+        Invalidate(EInvalidateWidgetReason::Paint);
+    }
 }
 
 SHandposeAssignmentLane::FHitResult SHandposeAssignmentLane::hitTest(

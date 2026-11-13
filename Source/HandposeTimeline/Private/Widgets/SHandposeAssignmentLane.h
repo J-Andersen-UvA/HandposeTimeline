@@ -53,6 +53,7 @@ public:
     virtual FReply OnMouseButtonUp(
         const FGeometry& myGeometry,
         const FPointerEvent& mouseEvent) override;
+    virtual void OnMouseLeave(const FPointerEvent& mouseEvent) override;
 
 private:
     enum class EDragTarget
@@ -81,6 +82,7 @@ private:
     int32 selectedAssignmentIndex = INDEX_NONE;
     int32 draggedAssignmentIndex = INDEX_NONE;
     EDragTarget dragTarget = EDragTarget::None;
+    FHitResult hoveredHit;
     FHandposeAssignment assignmentAtDragStart;
     int32 cursorFrameAtDragStart = 0;
     FOnHandposeAssignmentSelected onAssignmentSelected;

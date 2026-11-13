@@ -10,6 +10,13 @@
 
 #define LOCTEXT_NAMESPACE "SHandposeTimelineTrack"
 
+namespace
+{
+constexpr float timelineLaneHeight = 58.0f;
+constexpr float laneLabelTopPadding = 3.0f;
+constexpr float laneLabelBottomPadding = 2.0f;
+}
+
 void SHandposeTimelineTrack::Construct(const FArguments& arguments)
 {
     handSide = arguments._HandSide;
@@ -57,7 +64,11 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
-                    .Padding(1.0f, 8.0f, 0.0f, 4.0f)
+                    .Padding(
+                        1.0f,
+                        laneLabelTopPadding,
+                        0.0f,
+                        laneLabelBottomPadding)
                     [
                         SNew(STextBlock)
                         .Text(LOCTEXT("AssignedHandshapes", "Assigned Handshapes"))
@@ -67,16 +78,20 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     [
-                        SAssignNew(assignmentLane, SHandposeAssignmentLane)
-                        .OnAssignmentSelected(
-                            this,
-                            &SHandposeTimelineTrack::handleAssignmentSelected)
-                        .OnFingerEditRequested(
-                            this,
-                            &SHandposeTimelineTrack::handleAssignmentFingerEditRequested)
-                        .OnAssignmentChanged(
-                            this,
-                            &SHandposeTimelineTrack::handleAssignmentChanged)
+                        SNew(SBox)
+                        .HeightOverride(timelineLaneHeight)
+                        [
+                            SAssignNew(assignmentLane, SHandposeAssignmentLane)
+                            .OnAssignmentSelected(
+                                this,
+                                &SHandposeTimelineTrack::handleAssignmentSelected)
+                            .OnFingerEditRequested(
+                                this,
+                                &SHandposeTimelineTrack::handleAssignmentFingerEditRequested)
+                            .OnAssignmentChanged(
+                                this,
+                                &SHandposeTimelineTrack::handleAssignmentChanged)
+                        ]
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
@@ -84,7 +99,11 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                         SAssignNew(faceTouchCorrectionContainer, SVerticalBox)
                         + SVerticalBox::Slot()
                         .AutoHeight()
-                        .Padding(1.0f, 8.0f, 0.0f, 4.0f)
+                        .Padding(
+                            1.0f,
+                            laneLabelTopPadding,
+                            0.0f,
+                            laneLabelBottomPadding)
                         [
                             SNew(STextBlock)
                             .Text(LOCTEXT("FaceTouchCorrections", "Face Touch Corrections"))
@@ -94,16 +113,20 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                         + SVerticalBox::Slot()
                         .AutoHeight()
                         [
-                            SAssignNew(faceTouchCorrectionLane, SFaceTouchCorrectionLane)
-                            .OnCorrectionSelected(
-                                this,
-                                &SHandposeTimelineTrack::handleFaceTouchCorrectionSelected)
-                            .OnCorrectionChanged(
-                                this,
-                                &SHandposeTimelineTrack::handleFaceTouchCorrectionChanged)
-                            .OnCorrectionEditRequested(
-                                this,
-                                &SHandposeTimelineTrack::handleFaceTouchCorrectionEditRequested)
+                            SNew(SBox)
+                            .HeightOverride(timelineLaneHeight)
+                            [
+                                SAssignNew(faceTouchCorrectionLane, SFaceTouchCorrectionLane)
+                                .OnCorrectionSelected(
+                                    this,
+                                    &SHandposeTimelineTrack::handleFaceTouchCorrectionSelected)
+                                .OnCorrectionChanged(
+                                    this,
+                                    &SHandposeTimelineTrack::handleFaceTouchCorrectionChanged)
+                                .OnCorrectionEditRequested(
+                                    this,
+                                    &SHandposeTimelineTrack::handleFaceTouchCorrectionEditRequested)
+                            ]
                         ]
                     ]
                 ]
@@ -289,7 +312,7 @@ TSharedRef<SWidget> SHandposeTimelineTrack::createSegmentWidget(
 
     return SNew(SBox)
         .WidthOverride(segmentWidth)
-        .HeightOverride(112.0f)
+        .HeightOverride(timelineLaneHeight)
         [
             SNew(SBorder)
             .BorderImage(FAppStyle::GetBrush(TEXT("WhiteBrush")))
@@ -303,16 +326,16 @@ TSharedRef<SWidget> SHandposeTimelineTrack::createSegmentWidget(
                 .ToolTipText(FText::Format(
                     LOCTEXT(
                         "SegmentTooltip",
-                        "Segment {0}\nFrameRange\n{1}-{2}\n{3} seconds"),
+                        "Segment {0}\n{1}-{2}"),
                     FText::AsNumber(segmentIndex + 1),
                     FText::AsNumber(segment.startFrame),
-                    FText::AsNumber(segment.endFrame),
-                    FText::AsNumber(segment.durationSeconds)))
+                    FText::AsNumber(segment.endFrame)))
                 .ButtonColorAndOpacity(
                     isSelected
                         ? FLinearColor(0.08f, 0.24f, 0.38f, 1.0f)
                         : FLinearColor::White)
                 .OnClicked(this, &SHandposeTimelineTrack::onSegmentClicked, segmentIndex)
+                .VAlign(VAlign_Center)
                 [
                     SNew(SVerticalBox)
                     + SVerticalBox::Slot()
@@ -325,23 +348,13 @@ TSharedRef<SWidget> SHandposeTimelineTrack::createSegmentWidget(
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    .Padding(0.0f, 3.0f, 0.0f, 0.0f)
                     [
                         SNew(STextBlock)
                         .Text(FText::Format(
-                            LOCTEXT("SegmentFrames", "FrameRange\n{0}-{1}"),
+                            LOCTEXT("SegmentFrames", "{0}-{1}"),
                             FText::AsNumber(segment.startFrame),
                             FText::AsNumber(segment.endFrame)))
-                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
-                        SNew(STextBlock)
-                        .Text(FText::Format(
-                            LOCTEXT("SegmentDuration", "{0} seconds"),
-                            FText::AsNumber(segment.durationSeconds)))
                         .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
                         .ColorAndOpacity(FSlateColor::UseSubduedForeground())
                     ]
@@ -355,14 +368,14 @@ TSharedRef<SWidget> SHandposeTimelineTrack::createGapWidget(
 {
     return SNew(SBox)
         .WidthOverride(layout.getBlockWidth(block))
-        .HeightOverride(112.0f)
+        .HeightOverride(timelineLaneHeight)
         [
             SNew(SBorder)
             .BorderImage(FAppStyle::GetBrush(TEXT("WhiteBrush")))
             .BorderBackgroundColor(FLinearColor(0.12f, 0.12f, 0.12f, 1.0f))
             .Padding(6.0f)
             .ToolTipText(FText::Format(
-                LOCTEXT("UnsegmentedFramesTooltip", "Unsegmented frames\nFrameRange\n{0}-{1}"),
+                LOCTEXT("UnsegmentedFramesTooltip", "Unsegmented frames\n{0}-{1}"),
                 FText::AsNumber(block.startFrame),
                 FText::AsNumber(block.endFrame)))
         ];

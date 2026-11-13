@@ -1475,7 +1475,8 @@ void SHandposeTimelineWidget::onSegmentSelected(
 
 void SHandposeTimelineWidget::onHandshapeChosen(
     const int32 segmentIndex,
-    const FHandshapeCandidate& candidate)
+    const FHandshapeCandidate& candidate,
+    const bool alsoPasteForOtherHand)
 {
     const EHandposeSide handSide = candidate.handSide;
     TArray<FHandposeTimelineSegment>& segments = getSegments(handSide);
@@ -1531,10 +1532,85 @@ void SHandposeTimelineWidget::onHandshapeChosen(
     assignment.skippedFingers = candidate.skippedFingers;
     linkOverlappingAssignments(handSide);
     updateAssignmentCoverage(handSide);
+
+    bool pastedForOtherHand = false;
+    if (alsoPasteForOtherHand)
+    {
+        const FHandposeAssignment sourceAssignment =
+            assignments[selectedAssignmentIndex];
+        const EHandposeSide otherHandSide = handSide == EHandposeSide::Right
+            ? EHandposeSide::Left
+            : EHandposeSide::Right;
+        TArray<FHandposeTimelineSegment>& otherSegments = getSegments(otherHandSide);
+        TArray<FHandposeAssignment>& otherAssignments = getAssignments(otherHandSide);
+
+        int32 otherSegmentIndex = INDEX_NONE;
+        int32 bestOverlap = 0;
+        double bestCenterDistance = TNumericLimits<double>::Max();
+        const double sourceCenter =
+            (sourceAssignment.fullPoseStartFrame + sourceAssignment.fullPoseEndFrame) * 0.5;
+        for (int32 otherIndex = 0; otherIndex < otherSegments.Num(); ++otherIndex)
+        {
+            const FHandposeTimelineSegment& otherSegment = otherSegments[otherIndex];
+            const int32 overlap = FMath::Max(
+                0,
+                FMath::Min(
+                    sourceAssignment.fullPoseEndFrame,
+                    otherSegment.endFrame) -
+                    FMath::Max(
+                        sourceAssignment.fullPoseStartFrame,
+                        otherSegment.startFrame) + 1);
+            const double centerDistance = FMath::Abs(
+                sourceCenter -
+                (otherSegment.startFrame + otherSegment.endFrame) * 0.5);
+            if (overlap > bestOverlap ||
+                (overlap == bestOverlap && centerDistance < bestCenterDistance))
+            {
+                otherSegmentIndex = otherIndex;
+                bestOverlap = overlap;
+                bestCenterDistance = centerDistance;
+            }
+        }
+
+        int32 otherAssignmentIndex = otherAssignments.IndexOfByPredicate(
+            [otherSegmentIndex, sourceCenter](const FHandposeAssignment& otherAssignment)
+            {
+                return (otherSegmentIndex != INDEX_NONE &&
+                        (otherAssignment.sourceSegmentIndex == otherSegmentIndex ||
+                            otherAssignment.coveredSegmentIndices.Contains(
+                                otherSegmentIndex))) ||
+                    (sourceCenter >= otherAssignment.blendStartFrame &&
+                        sourceCenter <= otherAssignment.blendEndFrame);
+            });
+        const FGuid assignmentId = otherAssignments.IsValidIndex(otherAssignmentIndex)
+            ? otherAssignments[otherAssignmentIndex].assignmentId
+            : FGuid::NewGuid();
+        if (otherAssignmentIndex == INDEX_NONE)
+        {
+            otherAssignmentIndex = otherAssignments.AddDefaulted();
+        }
+
+        FHandposeAssignment otherAssignment = sourceAssignment;
+        otherAssignment.assignmentId = assignmentId;
+        otherAssignment.sourceSegmentIndex = otherSegmentIndex;
+        otherAssignment.handSide = otherHandSide;
+        otherAssignment.mirrorToOppositeHand =
+            !sourceAssignment.mirrorToOppositeHand;
+        otherAssignment.coveredSegmentIndices.Reset();
+        otherAssignments[otherAssignmentIndex] = MoveTemp(otherAssignment);
+        linkOverlappingAssignments(otherHandSide);
+        updateAssignmentCoverage(otherHandSide);
+        pastedForOtherHand = true;
+    }
+
     statusText->SetText(FText::Format(
-        LOCTEXT(
-            "HandshapeAssigned",
-            "Assigned {0} to Segment {1}."),
+        pastedForOtherHand
+            ? LOCTEXT(
+                "HandshapeAssignedBothHands",
+                "Assigned {0} to Segment {1} and the opposite-hand lane.")
+            : LOCTEXT(
+                "HandshapeAssigned",
+                "Assigned {0} to Segment {1}."),
         FText::FromName(candidate.handshapeId),
         FText::AsNumber(segmentIndex + 1)));
     rebuildPreviewAnimation(true);

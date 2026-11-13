@@ -12,7 +12,11 @@ class SWindow;
 template<typename ItemType> class STileView;
 struct FHandshapeCandidate;
 
-DECLARE_DELEGATE_TwoParams(FOnHandshapeChosen, int32, const FHandshapeCandidate&)
+DECLARE_DELEGATE_ThreeParams(
+    FOnHandshapeChosen,
+    int32,
+    const FHandshapeCandidate&,
+    bool)
 
 class SHandshapePickerWidget : public SCompoundWidget
 {
@@ -42,6 +46,7 @@ private:
     FReply onCancelClicked();
     FReply onUseHandshapeClicked();
     void onPickSelectedFingersChanged(ECheckBoxState state);
+    void onAlsoPasteForOtherHandChanged(ECheckBoxState state);
     void openFingerSelectionWindow();
     void onSkippedFingersChosen(const TArray<EHandposeFinger>& skippedFingers);
     void submitSelectedHandshape(const TArray<EHandposeFinger>& skippedFingers);
@@ -59,6 +64,7 @@ private:
     TArray<FCandidateItem> filteredCandidates;
     FCandidateItem selectedCandidate;
     bool pickSelectedFingers = false;
+    bool alsoPasteForOtherHand = false;
     FOnHandshapeChosen onHandshapeChosen;
     TWeakPtr<SWindow> ownerWindow;
     TSharedPtr<FAssetThumbnailPool> thumbnailPool;

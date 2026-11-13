@@ -75,7 +75,8 @@ private:
     void onSegmentSelected(EHandposeSide handSide, int32 segmentIndex);
     void onHandshapeChosen(
         int32 segmentIndex,
-        const FHandshapeCandidate& candidate);
+        const FHandshapeCandidate& candidate,
+        bool alsoPasteForOtherHand);
     void onAssignmentSelected(EHandposeSide handSide, int32 assignmentIndex);
     void onAssignmentChanged(
         EHandposeSide handSide,

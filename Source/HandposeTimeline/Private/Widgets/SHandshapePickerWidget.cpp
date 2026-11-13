@@ -68,16 +68,39 @@ void SHandshapePickerWidget::Construct(const FArguments& arguments)
             .AutoHeight()
             .Padding(0.0f, 0.0f, 0.0f, 10.0f)
             [
-                SNew(SCheckBox)
-                .ToolTipText(LOCTEXT(
-                    "PickSelectedFingersTooltip",
-                    "After choosing a handshape, choose which fingers should keep their original animation."))
-                .OnCheckStateChanged(
-                    this,
-                    &SHandshapePickerWidget::onPickSelectedFingersChanged)
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot()
+                .AutoHeight()
                 [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("PickSelectedFingers", "Pick Selected Fingers"))
+                    SNew(SCheckBox)
+                    .ToolTipText(LOCTEXT(
+                        "PickSelectedFingersTooltip",
+                        "After choosing a handshape, choose which fingers should keep their original animation."))
+                    .OnCheckStateChanged(
+                        this,
+                        &SHandshapePickerWidget::onPickSelectedFingersChanged)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("PickSelectedFingers", "Pick Selected Fingers"))
+                    ]
+                ]
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                [
+                    SNew(SCheckBox)
+                    .ToolTipText(LOCTEXT(
+                        "AlsoPasteForOtherHandTooltip",
+                        "Assign the selected handshape to the opposite-hand lane over the same frames."))
+                    .OnCheckStateChanged(
+                        this,
+                        &SHandshapePickerWidget::onAlsoPasteForOtherHandChanged)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT(
+                            "AlsoPasteForOtherHand",
+                            "Also Paste for Other Hand"))
+                    ]
                 ]
             ]
             + SVerticalBox::Slot()
@@ -243,6 +266,12 @@ void SHandshapePickerWidget::onPickSelectedFingersChanged(
     pickSelectedFingers = state == ECheckBoxState::Checked;
 }
 
+void SHandshapePickerWidget::onAlsoPasteForOtherHandChanged(
+    const ECheckBoxState state)
+{
+    alsoPasteForOtherHand = state == ECheckBoxState::Checked;
+}
+
 void SHandshapePickerWidget::openFingerSelectionWindow()
 {
     const TSharedPtr<SWindow> pickerWindow = ownerWindow.Pin();
@@ -279,7 +308,10 @@ void SHandshapePickerWidget::submitSelectedHandshape(
     {
         FHandshapeCandidate candidate = *selectedCandidate;
         candidate.skippedFingers = skippedFingers;
-        onHandshapeChosen.ExecuteIfBound(segmentIndex, candidate);
+        onHandshapeChosen.ExecuteIfBound(
+            segmentIndex,
+            candidate,
+            alsoPasteForOtherHand);
     }
     if (const TSharedPtr<SWindow> window = ownerWindow.Pin())
     {

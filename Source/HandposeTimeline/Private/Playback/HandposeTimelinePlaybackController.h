@@ -34,7 +34,6 @@ public:
     EHandposeTimelinePlaybackResult scrubTo(float timeSeconds);
     void pause();
     void toggleLoopAll();
-    void toggleLoopSegment();
     float cyclePlayRate();
 
     AActor* getActor() const;
@@ -42,7 +41,6 @@ public:
     float getPlayRate() const;
     bool isPlaying() const;
     bool shouldLoopAll() const;
-    bool shouldLoopSegment() const;
 
 private:
     EHandposeTimelinePlaybackResult validatePlayback() const;
@@ -60,5 +58,4 @@ private:
     bool isPreviewingSegment = false;
     bool isPlayingTimeline = false;
     bool loopAll = false;
-    bool loopSegment = false;
 };

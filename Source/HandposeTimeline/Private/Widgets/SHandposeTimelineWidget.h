@@ -61,7 +61,6 @@ private:
     FReply onUseSelectedActorClicked();
     FReply onFaceTouchCorrectionModeClicked();
     FReply onLoopAllClicked();
-    FReply onLoopSegmentClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
     FReply onShortcutsHelpClicked();

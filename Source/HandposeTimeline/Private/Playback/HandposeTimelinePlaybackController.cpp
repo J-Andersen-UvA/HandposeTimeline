@@ -20,20 +20,10 @@ void FHandposeTimelinePlaybackController::tick()
         previewComponent != nullptr &&
         currentTimeSeconds >= previewEndTimeSeconds)
     {
-        if (loopSegment)
-        {
-            previewComponent->SetPosition(previewStartTimeSeconds, false);
-            previewComponent->SetPlayRate(playRate);
-            previewComponent->Play(false);
-            currentTimeSeconds = previewStartTimeSeconds;
-        }
-        else
-        {
-            previewComponent->Stop();
-            previewComponent->SetPosition(previewEndTimeSeconds, false);
-            currentTimeSeconds = previewEndTimeSeconds;
-            isPreviewingSegment = false;
-        }
+        previewComponent->Stop();
+        previewComponent->SetPosition(previewEndTimeSeconds, false);
+        currentTimeSeconds = previewEndTimeSeconds;
+        isPreviewingSegment = false;
     }
     else if (isPlayingTimeline &&
         previewComponent != nullptr &&
@@ -228,19 +218,6 @@ void FHandposeTimelinePlaybackController::pause()
 void FHandposeTimelinePlaybackController::toggleLoopAll()
 {
     loopAll = !loopAll;
-    if (loopAll)
-    {
-        loopSegment = false;
-    }
-}
-
-void FHandposeTimelinePlaybackController::toggleLoopSegment()
-{
-    loopSegment = !loopSegment;
-    if (loopSegment)
-    {
-        loopAll = false;
-    }
 }
 
 float FHandposeTimelinePlaybackController::cyclePlayRate()
@@ -288,11 +265,6 @@ bool FHandposeTimelinePlaybackController::isPlaying() const
 bool FHandposeTimelinePlaybackController::shouldLoopAll() const
 {
     return loopAll;
-}
-
-bool FHandposeTimelinePlaybackController::shouldLoopSegment() const
-{
-    return loopSegment;
 }
 
 EHandposeTimelinePlaybackResult FHandposeTimelinePlaybackController::validatePlayback() const

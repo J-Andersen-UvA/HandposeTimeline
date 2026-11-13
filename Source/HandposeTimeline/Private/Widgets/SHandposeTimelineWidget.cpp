@@ -31,14 +31,18 @@
 #include "FaceTouch/FaceTouchPreviewBuilder.h"
 #include "Handposes/HandposeMirrorService.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/SHandshapePickerWidget.h"
 #include "Widgets/SHandposeFingerSelectionWidget.h"
 #include "Widgets/SHandposeTimelineTrack.h"
@@ -52,7 +56,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogHandposeTimelineRecommendations, Log, All);
 namespace
 {
 constexpr float minimumTimelineZoom = 1.0f;
-constexpr float maximumTimelineZoom = 5.0f;
+constexpr float maximumTimelineZoom = 2.5f;
 const TCHAR* configPersistenceSection = TEXT("HandposeTimeline");
 const TCHAR* configPersistenceKey = TEXT("LastConfigAsset");
 
@@ -266,29 +270,484 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
     playbackController = MakeShared<FHandposeTimelinePlaybackController>();
     TSharedPtr<SHandposeTimelineVerticalScrollBox> verticalTimelineScrollBox;
 
+    const auto makeToolbarButton = [](
+        const FName iconName,
+        const TAttribute<FText>& label,
+        const FText& tooltip,
+        const FOnClicked& onClicked,
+        const TAttribute<FSlateColor>& buttonColor,
+        const bool enabled = true)
+    {
+        return SNew(SButton)
+            .ToolTipText(tooltip)
+            .OnClicked(onClicked)
+            .ButtonColorAndOpacity(buttonColor)
+            .IsEnabled(enabled)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SImage)
+                    .Image(FAppStyle::GetBrush(iconName))
+                    .ColorAndOpacity(FSlateColor::UseForeground())
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(label)
+                ]
+            ];
+    };
+
+    const auto makeGroupLabel = [](const FText& label)
+    {
+        return SNew(STextBlock)
+            .Text(label)
+            .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))
+            .ColorAndOpacity(FSlateColor::UseSubduedForeground());
+    };
+
+    const TAttribute<FSlateColor> defaultButtonColor =
+        FSlateColor(FLinearColor::White);
+    const TAttribute<FSlateColor> faceTouchButtonColor =
+        TAttribute<FSlateColor>::CreateLambda(
+            [this]()
+            {
+                return FSlateColor(
+                    faceTouchCorrectionModeEnabled
+                        ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                        : FLinearColor::White);
+            });
+    const TAttribute<FSlateColor> actorButtonColor =
+        TAttribute<FSlateColor>::CreateLambda(
+            [this]()
+            {
+                return FSlateColor(
+                    playbackController->getActor() != nullptr
+                        ? FLinearColor(0.2f, 0.5f, 0.25f, 1.0f)
+                        : FLinearColor(0.55f, 0.18f, 0.18f, 1.0f));
+            });
+    const TAttribute<FSlateColor> loopAllButtonColor =
+        TAttribute<FSlateColor>::CreateLambda(
+            [this]()
+            {
+                return FSlateColor(
+                    playbackController->shouldLoopAll()
+                        ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                        : FLinearColor::White);
+            });
+
     ChildSlot
     [
         SNew(SVerticalBox)
         + SVerticalBox::Slot()
         .AutoHeight()
-        .Padding(8.0f)
+        .Padding(8.0f, 8.0f, 8.0f, 4.0f)
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                .Padding(6.0f)
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                    [
+                        makeGroupLabel(LOCTEXT("SetupGroup", "SETUP"))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SUniformGridPanel)
+                        .SlotPadding(FMargin(2.0f))
+                        + SUniformGridPanel::Slot(0, 0)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Settings"),
+                                LOCTEXT("LoadConfigCompact", "Config"),
+                                LOCTEXT(
+                                    "LoadConfigTooltip",
+                                    "Choose the segmentation and handshape source configuration."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onLoadConfigClicked),
+                                defaultButtonColor)
+                        ]
+                        + SUniformGridPanel::Slot(1, 0)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.FolderOpen"),
+                                LOCTEXT("LoadAnimationCompact", "Animation"),
+                                LOCTEXT(
+                                    "LoadAnimationTooltip",
+                                    "Choose an animation and generate its handpose segments."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onLoadAnimationClicked),
+                                defaultButtonColor)
+                        ]
+                        + SUniformGridPanel::Slot(0, 1)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.SelectInViewport"),
+                                LOCTEXT("UseSelectedActorCompact", "Actor"),
+                                LOCTEXT(
+                                    "UseSelectedActorTooltip",
+                                    "Use the selected scene actor and its skeletal mesh for segment previews."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onUseSelectedActorClicked),
+                                actorButtonColor)
+                        ]
+                    ]
+                ]
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(4.0f, 0.0f)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                .Padding(6.0f)
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                    [
+                        makeGroupLabel(LOCTEXT("FunctionsGroup", "FUNCTIONS"))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Edit"),
+                                LOCTEXT("FaceTouchCorrectionMode", "Face Touch"),
+                                LOCTEXT(
+                                    "FaceTouchCorrectionModeTooltip",
+                                    "Show face-touch correction lanes and enable face-touch authoring."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked),
+                                faceTouchButtonColor)
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Transform"),
+                                LOCTEXT("Rotate180", "Rotate 180"),
+                                LOCTEXT(
+                                    "Rotate180Tooltip",
+                                    "Rotate 180 behavior has not been configured yet."),
+                                FOnClicked(),
+                                defaultButtonColor,
+                                false)
+                        ]
+                    ]
+                ]
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                .Padding(6.0f)
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                    [
+                        makeGroupLabel(LOCTEXT("PlaybackGroup", "PLAYBACK"))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        [
+                            SNew(SButton)
+                            .ToolTipText(LOCTEXT(
+                                "PlayPauseTimelineTooltip",
+                                "Play the full animation from the playhead or pause active playback."))
+                            .OnClicked(this, &SHandposeTimelineWidget::onPlayPauseClicked)
+                            [
+                                SNew(SHorizontalBox)
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                [
+                                    SNew(SBox)
+                                    .WidthOverride(16.0f)
+                                    .HeightOverride(16.0f)
+                                    [
+                                        SNew(SImage)
+                                        .Image_Lambda(
+                                            [this]()
+                                            {
+                                                return FAppStyle::GetBrush(
+                                                    playbackController->isPlaying()
+                                                        ? TEXT("Icons.Toolbar.Pause")
+                                                        : TEXT("Icons.Play"));
+                                            })
+                                        .ColorAndOpacity(FSlateColor::UseForeground())
+                                    ]
+                                ]
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+                                [
+                                    SNew(STextBlock)
+                                    .Text(this, &SHandposeTimelineWidget::getPlayPauseButtonText)
+                                ]
+                            ]
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(8.0f, 0.0f)
+                        [
+                            SNew(STextBlock)
+                            .Text(this, &SHandposeTimelineWidget::getTimecodeText)
+                            .Font(FAppStyle::GetFontStyle(TEXT("MonospacedText")))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Refresh"),
+                                LOCTEXT("LoopAll", "Loop All"),
+                                LOCTEXT(
+                                    "LoopAllTooltip",
+                                    "Loop the full timeline when using Play."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onLoopAllClicked),
+                                loopAllButtonColor)
+                        ]
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            [
+                                SNew(SButton)
+                                .ToolTipText(LOCTEXT(
+                                    "PreviewSpeedTooltip",
+                                    "Cycle the segment preview speed between 0.25x, 0.5x, and 1x."))
+                                .OnClicked(this, &SHandposeTimelineWidget::onSpeedClicked)
+                                [
+                                    SNew(SHorizontalBox)
+                                    + SHorizontalBox::Slot()
+                                    .AutoWidth()
+                                    .VAlign(VAlign_Center)
+                                    [
+                                        SNew(SImage)
+                                        .Image(FAppStyle::GetBrush(TEXT("Icons.Adjust")))
+                                        .ColorAndOpacity(FSlateColor::UseForeground())
+                                    ]
+                                    + SHorizontalBox::Slot()
+                                    .AutoWidth()
+                                    .VAlign(VAlign_Center)
+                                    .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+                                    [
+                                        SAssignNew(speedText, STextBlock)
+                                        .Text(LOCTEXT("DefaultPreviewSpeed", "Speed: 1x"))
+                                    ]
+                                ]
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(8.0f, 0.0f, 4.0f, 0.0f)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT("TimelineZoom", "Zoom"))
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(SBox)
+                                .WidthOverride(100.0f)
+                                [
+                                    SNew(SSlider)
+                                    .Value_Lambda(
+                                        [this]()
+                                        {
+                                            return (timelineZoom - minimumTimelineZoom) /
+                                                (maximumTimelineZoom - minimumTimelineZoom);
+                                        })
+                                    .OnValueChanged(
+                                        this,
+                                        &SHandposeTimelineWidget::onZoomChanged)
+                                ]
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(4.0f, 0.0f)
+                            [
+                                SAssignNew(zoomText, STextBlock)
+                                .Text(LOCTEXT("DefaultZoom", "100%"))
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            [
+                                makeToolbarButton(
+                                    TEXT("Icons.Help"),
+                                    FText::GetEmpty(),
+                                    LOCTEXT(
+                                        "ShortcutsHelpTooltip",
+                                        "Show HandposeTimeline shortcuts."),
+                                    FOnClicked::CreateSP(
+                                        this,
+                                        &SHandposeTimelineWidget::onShortcutsHelpClicked),
+                                    defaultButtonColor)
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                .Padding(6.0f)
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                    [
+                        makeGroupLabel(LOCTEXT("FinishingGroup", "FINISHING"))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SComboButton)
+                            .ToolTipText(LOCTEXT(
+                                "DecisionDataTooltip",
+                                "Save or import HandposeTimeline decision data."))
+                            .OnGetMenuContent_Lambda(
+                                [this]()
+                                {
+                                    FMenuBuilder menuBuilder(true, nullptr);
+                                    menuBuilder.AddMenuEntry(
+                                        LOCTEXT("SaveDecisionData", "Save"),
+                                        LOCTEXT(
+                                            "SaveDecisionDataTooltip",
+                                            "Capture the final timeline decisions and immediately write the Data Asset and JSON."),
+                                        FSlateIcon(
+                                            FAppStyle::GetAppStyleSetName(),
+                                            TEXT("Icons.Save")),
+                                        FUIAction(FExecuteAction::CreateLambda(
+                                            [this]()
+                                            {
+                                                onSaveDecisionDataClicked();
+                                            })));
+                                    menuBuilder.AddMenuEntry(
+                                        LOCTEXT("ImportDecisionData", "Import"),
+                                        LOCTEXT(
+                                            "ImportDecisionDataTooltip",
+                                            "Import decision-data JSON and create or update its Data Asset."),
+                                        FSlateIcon(
+                                            FAppStyle::GetAppStyleSetName(),
+                                            TEXT("Icons.Import")),
+                                        FUIAction(FExecuteAction::CreateLambda(
+                                            [this]()
+                                            {
+                                                onImportDecisionDataClicked();
+                                            })));
+                                    return menuBuilder.MakeWidget();
+                                })
+                            .ButtonContent()
+                            [
+                                SNew(SHorizontalBox)
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                [
+                                    SNew(SImage)
+                                    .Image(FAppStyle::GetBrush(TEXT("Icons.Save")))
+                                    .ColorAndOpacity(FSlateColor::UseForeground())
+                                ]
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+                                [
+                                    SNew(STextBlock)
+                                    .Text(LOCTEXT("DecisionData", "Decision Data"))
+                                ]
+                            ]
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Package"),
+                                LOCTEXT("Bake", "Bake"),
+                                LOCTEXT(
+                                    "BakeTooltip",
+                                    "Bake the current handshape preview to the configured output folder."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onBakeClicked),
+                                defaultButtonColor)
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(8.0f, 0.0f, 8.0f, 6.0f)
         [
             SNew(SHorizontalBox)
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
             [
-                SNew(SButton)
-                .Text(LOCTEXT("LoadConfig", "Load Config"))
-                .ToolTipText(LOCTEXT(
-                    "LoadConfigTooltip",
-                    "Choose the segmentation and handshape source configuration."))
-                .OnClicked(this, &SHandposeTimelineWidget::onLoadConfigClicked)
+                SNew(STextBlock)
+                .Text(LOCTEXT("ConfigStatusLabel", "Config:"))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(8.0f, 0.0f, 12.0f, 0.0f)
+            .Padding(4.0f, 0.0f, 12.0f, 0.0f)
             [
                 SAssignNew(configNameText, STextBlock)
                 .Text(LOCTEXT("NoConfig", "Default settings"))
@@ -297,48 +756,14 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .AutoWidth()
             .VAlign(VAlign_Center)
             [
-                SNew(SButton)
-                .Text(LOCTEXT("LoadAnimation", "Load Animation"))
-                .ToolTipText(LOCTEXT("LoadAnimationTooltip", "Choose an animation and generate its handpose segments."))
-                .OnClicked(this, &SHandposeTimelineWidget::onLoadAnimationClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("Bake", "Bake"))
-                .ToolTipText(LOCTEXT(
-                    "BakeTooltip",
-                    "Bake the current handshape preview to the configured output folder."))
-                .OnClicked(this, &SHandposeTimelineWidget::onBakeClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("SaveDecisionData", "Save Decision Data"))
-                .ToolTipText(LOCTEXT(
-                    "SaveDecisionDataTooltip",
-                    "Capture the final timeline decisions and immediately write the Data Asset and JSON."))
-                .OnClicked(this, &SHandposeTimelineWidget::onSaveDecisionDataClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("ImportDecisionData", "Import Decision Data"))
-                .ToolTipText(LOCTEXT(
-                    "ImportDecisionDataTooltip",
-                    "Import decision-data JSON and create or update its Data Asset."))
-                .OnClicked(this, &SHandposeTimelineWidget::onImportDecisionDataClicked)
+                SNew(STextBlock)
+                .Text(LOCTEXT("AnimationStatusLabel", "Animation:"))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(12.0f, 0.0f)
+            .Padding(4.0f, 0.0f, 12.0f, 0.0f)
             [
                 SAssignNew(animationNameText, STextBlock)
                 .Text(LOCTEXT("NoAnimation", "No animation loaded"))
@@ -346,19 +771,15 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(12.0f, 0.0f, 0.0f, 0.0f)
             [
-                SNew(SButton)
-                .Text(LOCTEXT("UseSelectedActor", "Use Selected Actor"))
-                .ToolTipText(LOCTEXT(
-                    "UseSelectedActorTooltip",
-                    "Use the selected scene actor and its skeletal mesh for segment previews."))
-                .OnClicked(this, &SHandposeTimelineWidget::onUseSelectedActorClicked)
+                SNew(STextBlock)
+                .Text(LOCTEXT("ActorStatusLabel", "Actor:"))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
             + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
+            .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(12.0f, 0.0f)
+            .Padding(4.0f, 0.0f, 12.0f, 0.0f)
             [
                 SAssignNew(actorNameText, STextBlock)
                 .Text(LOCTEXT("NoActor", "No actor selected"))
@@ -366,146 +787,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             + SHorizontalBox::Slot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT(
-                    "FaceTouchCorrectionMode",
-                    "FaceTouchCorrectionModus"))
-                .ToolTipText(LOCTEXT(
-                    "FaceTouchCorrectionModeTooltip",
-                    "Show face-touch correction lanes and enable face-touch authoring."))
-                .ButtonColorAndOpacity_Lambda(
-                    [this]()
-                    {
-                        return faceTouchCorrectionModeEnabled
-                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
-                            : FLinearColor::White;
-                    })
-                .OnClicked(
-                    this,
-                    &SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("LoopAll", "Loop All"))
-                .ToolTipText(LOCTEXT("LoopAllTooltip", "Loop the full timeline when using Play."))
-                .ButtonColorAndOpacity_Lambda(
-                    [this]()
-                    {
-                        return playbackController->shouldLoopAll()
-                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
-                            : FLinearColor::White;
-                    })
-                .OnClicked(this, &SHandposeTimelineWidget::onLoopAllClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-            [
-                SNew(SButton)
-                .Text(LOCTEXT("LoopSegment", "Loop Segment"))
-                .ToolTipText(LOCTEXT(
-                    "LoopSegmentTooltip",
-                    "Loop the selected segment when using Play or previewing a segment."))
-                .ButtonColorAndOpacity_Lambda(
-                    [this]()
-                    {
-                        return playbackController->shouldLoopSegment()
-                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
-                            : FLinearColor::White;
-                    })
-                .OnClicked(this, &SHandposeTimelineWidget::onLoopSegmentClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
             .Padding(0.0f, 0.0f, 12.0f, 0.0f)
-            [
-                SNew(SButton)
-                .ToolTipText(LOCTEXT(
-                    "PreviewSpeedTooltip",
-                    "Cycle the segment preview speed between 0.25x, 0.5x, and 1x."))
-                .OnClicked(this, &SHandposeTimelineWidget::onSpeedClicked)
-                [
-                    SAssignNew(speedText, STextBlock)
-                    .Text(LOCTEXT("DefaultPreviewSpeed", "Speed: 1x"))
-                ]
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("TimelineZoom", "Zoom"))
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(8.0f, 0.0f)
-            [
-                SNew(SBox)
-                .WidthOverride(140.0f)
-                [
-                    SNew(SSlider)
-                    .Value_Lambda(
-                        [this]()
-                        {
-                            return (timelineZoom - minimumTimelineZoom) /
-                                (maximumTimelineZoom - minimumTimelineZoom);
-                        })
-                    .OnValueChanged(this, &SHandposeTimelineWidget::onZoomChanged)
-                ]
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SAssignNew(zoomText, STextBlock)
-                .Text(LOCTEXT("DefaultZoom", "100%"))
-            ]
-        ]
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(8.0f, 0.0f, 8.0f, 8.0f)
-        [
-            SAssignNew(statusText, STextBlock)
-            .Text(LOCTEXT("LoadPrompt", "Load an animation to generate segments."))
-            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-        ]
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(8.0f, 0.0f, 8.0f, 8.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            [
-                SNew(SButton)
-                .Text(this, &SHandposeTimelineWidget::getPlayPauseButtonText)
-                .ToolTipText(LOCTEXT(
-                    "PlayPauseTimelineTooltip",
-                    "Play the full animation from the playhead or pause active playback."))
-                .OnClicked(this, &SHandposeTimelineWidget::onPlayPauseClicked)
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(12.0f, 0.0f)
-            [
-                SNew(STextBlock)
-                .Text(this, &SHandposeTimelineWidget::getTimecodeText)
-                .Font(FAppStyle::GetFontStyle(TEXT("MonospacedText")))
-            ]
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(12.0f, 0.0f)
             [
                 SNew(STextBlock)
                 .Text(this, &SHandposeTimelineWidget::getTrimRangeText)
@@ -515,16 +797,12 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
             + SHorizontalBox::Slot()
-            .AutoWidth()
+            .FillWidth(1.0f)
             .VAlign(VAlign_Center)
-            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
             [
-                SNew(SButton)
-                .Text(LOCTEXT("ShortcutsHelp", "?"))
-                .ToolTipText(LOCTEXT(
-                    "ShortcutsHelpTooltip",
-                    "Show HandposeTimeline shortcuts."))
-                .OnClicked(this, &SHandposeTimelineWidget::onShortcutsHelpClicked)
+                SAssignNew(statusText, STextBlock)
+                .Text(LOCTEXT("LoadPrompt", "Load an animation to generate segments."))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
         ]
         + SVerticalBox::Slot()
@@ -791,12 +1069,6 @@ FReply SHandposeTimelineWidget::onLoopAllClicked()
     return FReply::Handled();
 }
 
-FReply SHandposeTimelineWidget::onLoopSegmentClicked()
-{
-    playbackController->toggleLoopSegment();
-    return FReply::Handled();
-}
-
 FReply SHandposeTimelineWidget::onSpeedClicked()
 {
     const float playRate = playbackController->cyclePlayRate();
@@ -817,24 +1089,8 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
         return FReply::Handled();
     }
 
-    const TArray<FHandposeTimelineSegment>& selectedSegments =
-        getSegments(selectedHandSide);
-    const int32 selectedSegmentIndex = selectedHandSide == EHandposeSide::Left
-        ? selectedLeftSegmentIndex
-        : selectedRightSegmentIndex;
-    if (playbackController->shouldLoopSegment() &&
-        !selectedSegments.IsValidIndex(selectedSegmentIndex))
-    {
-        statusText->SetText(LOCTEXT(
-            "LoopSegmentRequiresSelection",
-            "Select a segment before using Loop Segment playback."));
-        return FReply::Handled();
-    }
-
     const EHandposeTimelinePlaybackResult result =
-        playbackController->shouldLoopSegment()
-            ? playbackController->previewSegment(selectedSegments[selectedSegmentIndex])
-            : playbackController->playTimeline();
+        playbackController->playTimeline();
     if (result == EHandposeTimelinePlaybackResult::MissingAnimationOrActor)
     {
         statusText->SetText(LOCTEXT(

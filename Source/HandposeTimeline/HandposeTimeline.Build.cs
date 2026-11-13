@@ -18,6 +18,7 @@ public class HandposeTimeline : ModuleRules
             {
                 "AnimationBlueprintLibrary",
                 "AnimationDataController",
+                "AnimationPlacement",
                 "AdditiveBoneCorrection",
                 "AdditiveBoneCorrectionEditor",
                 "AssetRegistry",

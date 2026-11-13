@@ -3,6 +3,7 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/Skeleton.h"
+#include "AnimationPlacementService.h"
 #include "AnimPose.h"
 #include "AssetRegistry/AssetData.h"
 #include "Baking/HandposeBakeService.h"
@@ -59,6 +60,8 @@ constexpr float minimumTimelineZoom = 1.0f;
 constexpr float maximumTimelineZoom = 2.5f;
 const TCHAR* configPersistenceSection = TEXT("HandposeTimeline");
 const TCHAR* configPersistenceKey = TEXT("LastConfigAsset");
+const TCHAR* rotate180PersistenceKey = TEXT("Rotate180Enabled");
+const TCHAR* actorPersistenceKey = TEXT("LastPreviewActor");
 
 FString handSideToString(const EHandposeSide handSide)
 {
@@ -268,6 +271,11 @@ SHandposeTimelineWidget::~SHandposeTimelineWidget()
 void SHandposeTimelineWidget::Construct(const FArguments& arguments)
 {
     playbackController = MakeShared<FHandposeTimelinePlaybackController>();
+    GConfig->GetBool(
+        configPersistenceSection,
+        rotate180PersistenceKey,
+        rotate180Enabled,
+        GEditorPerProjectIni);
     TSharedPtr<SHandposeTimelineVerticalScrollBox> verticalTimelineScrollBox;
 
     const auto makeToolbarButton = [](
@@ -320,6 +328,15 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             {
                 return FSlateColor(
                     faceTouchCorrectionModeEnabled
+                        ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                        : FLinearColor::White);
+            });
+    const TAttribute<FSlateColor> rotate180ButtonColor =
+        TAttribute<FSlateColor>::CreateLambda(
+            [this]()
+            {
+                return FSlateColor(
+                    rotate180Enabled
                         ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
                         : FLinearColor::White);
             });
@@ -453,10 +470,11 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                 LOCTEXT("Rotate180", "Rotate 180"),
                                 LOCTEXT(
                                     "Rotate180Tooltip",
-                                    "Rotate 180 behavior has not been configured yet."),
-                                FOnClicked(),
-                                defaultButtonColor,
-                                false)
+                                    "Rotate the animation and its root motion 180 degrees."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onRotate180Clicked),
+                                rotate180ButtonColor)
                         ]
                     ]
                 ]
@@ -881,6 +899,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
 
     refreshTimeline();
     restoreLastConfig();
+    restoreLastActor();
 }
 
 void SHandposeTimelineWidget::Tick(
@@ -1021,6 +1040,7 @@ FReply SHandposeTimelineWidget::onUseSelectedActorClicked()
     }
     else
     {
+        saveLastActor(*selectedActor);
         actorNameText->SetText(FText::FromString(selectedActor->GetActorLabel()));
         statusText->SetText(FText::Format(
             LOCTEXT("PreviewActorSelected", "Using {0} for segment previews."),
@@ -1060,6 +1080,30 @@ FReply SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked()
             "FaceTouchCorrectionModeDisabled",
             "Face touch correction mode is inactive."));
     refreshTimeline();
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onRotate180Clicked()
+{
+    if (loadedAnimation.Get() == nullptr)
+    {
+        statusText->SetText(LOCTEXT(
+            "Rotate180RequiresAnimation",
+            "Load an animation before enabling Rotate 180."));
+        return FReply::Handled();
+    }
+
+    rotate180Enabled = !rotate180Enabled;
+    GConfig->SetBool(
+        configPersistenceSection,
+        rotate180PersistenceKey,
+        rotate180Enabled,
+        GEditorPerProjectIni);
+    GConfig->Flush(false, GEditorPerProjectIni);
+    rebuildPreviewAnimation(true);
+    statusText->SetText(rotate180Enabled
+        ? LOCTEXT("Rotate180Enabled", "Rotate 180 is enabled.")
+        : LOCTEXT("Rotate180Disabled", "Rotate 180 is disabled."));
     return FReply::Handled();
 }
 
@@ -1212,10 +1256,16 @@ bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
 {
     return Cast<UAnimSequence>(loadedAnimation.Get()) != nullptr &&
         loadedConfig.IsValid() &&
-        (hasAssignments() ||
-            !rightFaceTouchCorrections.IsEmpty() ||
-            !leftFaceTouchCorrections.IsEmpty() ||
-            hasCustomPlaybackRange());
+        hasPendingChanges();
+}
+
+bool SHandposeTimelineWidget::hasPendingChanges() const
+{
+    return hasAssignments() ||
+        !rightFaceTouchCorrections.IsEmpty() ||
+        !leftFaceTouchCorrections.IsEmpty() ||
+        rotate180Enabled ||
+        hasCustomPlaybackRange();
 }
 
 bool SHandposeTimelineWidget::hasAssignments() const
@@ -1260,12 +1310,13 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
     const bool hasFaceTouchCorrections =
         !rightFaceTouchCorrections.IsEmpty() ||
         !leftFaceTouchCorrections.IsEmpty();
-    if (!hasAssignments() && !hasFaceTouchCorrections && !hasCustomPlaybackRange())
+    if (!hasPendingChanges())
     {
-        errorMessage = TEXT("Assign at least one handshape or trim the animation before baking.");
+        errorMessage = TEXT("Make a timeline change before baking.");
         return false;
     }
-    if ((hasAssignments() || hasFaceTouchCorrections) && !previewAnimation.IsValid())
+    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled) &&
+        !previewAnimation.IsValid())
     {
         rebuildPreviewAnimation(false);
     }
@@ -2000,6 +2051,10 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
             "Generated {0} right-hand segments and {1} left-hand segments."),
         FText::AsNumber(rightSegments.Num()),
         FText::AsNumber(leftSegments.Num())));
+    if (rotate180Enabled)
+    {
+        rebuildPreviewAnimation(false);
+    }
     refreshTimeline();
 }
 
@@ -2017,9 +2072,13 @@ void SHandposeTimelineWidget::resetSession()
     faceTouchPointPickerWindow.Reset();
     IFaceTouchCorrectionEditorModule::get().endFacePicking();
 
+    AActor* retainedActor = playbackController->getActor();
     playbackController->pause();
-    playbackController->setActor(nullptr);
     playbackController = MakeShared<FHandposeTimelinePlaybackController>();
+    if (retainedActor != nullptr)
+    {
+        playbackController->setActor(retainedActor);
+    }
     loadedAnimation.Reset();
     previewAnimation.Reset();
     rightSegments.Reset();
@@ -2046,7 +2105,9 @@ void SHandposeTimelineWidget::resetSession()
         horizontalTimelineScrollBox->SetScrollOffset(0.0f);
     }
     animationNameText->SetText(LOCTEXT("NoAnimationAfterReset", "No animation loaded"));
-    actorNameText->SetText(LOCTEXT("NoActorAfterReset", "No actor selected"));
+    actorNameText->SetText(retainedActor != nullptr
+        ? FText::FromString(retainedActor->GetActorLabel())
+        : LOCTEXT("NoActorAfterReset", "No actor selected"));
     statusText->SetText(LOCTEXT(
         "SessionReset",
         "Load an animation to generate segments."));
@@ -2170,6 +2231,49 @@ void SHandposeTimelineWidget::saveLastConfig(
         configPersistenceSection,
         configPersistenceKey,
         *config.GetPathName(),
+        GEditorPerProjectIni);
+    GConfig->Flush(false, GEditorPerProjectIni);
+}
+
+void SHandposeTimelineWidget::restoreLastActor()
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+
+    FString actorPath;
+    if (!GConfig->GetString(
+            configPersistenceSection,
+            actorPersistenceKey,
+            actorPath,
+            GEditorPerProjectIni) ||
+        actorPath.IsEmpty())
+    {
+        return;
+    }
+
+    AActor* actor = Cast<AActor>(FSoftObjectPath(actorPath).ResolveObject());
+    if (actor == nullptr ||
+        playbackController->setActor(actor) != EHandposeTimelineActorResult::Success)
+    {
+        return;
+    }
+
+    actorNameText->SetText(FText::FromString(actor->GetActorLabel()));
+}
+
+void SHandposeTimelineWidget::saveLastActor(const AActor& actor) const
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+
+    GConfig->SetString(
+        configPersistenceSection,
+        actorPersistenceKey,
+        *actor.GetPathName(),
         GEditorPerProjectIni);
     GConfig->Flush(false, GEditorPerProjectIni);
 }
@@ -2497,7 +2601,9 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
         rightFaceTouchCorrections;
     faceTouchCorrections.Append(leftFaceTouchCorrections);
     if (sourceAnimation == nullptr ||
-        (assignments.IsEmpty() && faceTouchCorrections.IsEmpty()))
+        (assignments.IsEmpty() &&
+            faceTouchCorrections.IsEmpty() &&
+            !rotate180Enabled))
     {
         previewAnimation.Reset();
         playbackController->setAnimation(loadedAnimation.Get());
@@ -2513,11 +2619,26 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
         ? loadedConfig->getApplyBoneNames(EHandposeSide::Left)
         : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Left);
     UAnimSequence* previewSource = sourceAnimation;
+    if (rotate180Enabled)
+    {
+        const FAnimationPlacementResult rotationResult =
+            FAnimationPlacementService::rotate180(previewSource);
+        if (!rotationResult.success || rotationResult.animation == nullptr)
+        {
+            statusText->SetText(FText::Format(
+                LOCTEXT(
+                    "Rotate180PreviewBuildFailed",
+                    "Could not rotate the preview animation: {0}"),
+                FText::FromString(rotationResult.errorMessage)));
+            return;
+        }
+        previewSource = rotationResult.animation;
+    }
     if (!assignments.IsEmpty())
     {
         const FHandposePreviewBuildResult handposeResult =
             FHandposePreviewBuilder::build(
-                sourceAnimation,
+                previewSource,
                 assignments,
                 rightBoneNames,
                 leftBoneNames,

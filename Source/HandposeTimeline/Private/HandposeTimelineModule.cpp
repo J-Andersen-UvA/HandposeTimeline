@@ -85,6 +85,12 @@ bool FHandposeTimelineModule::canBakeCurrentAnimation() const
     return widget.IsValid() && widget->canBakeCurrentAnimation();
 }
 
+bool FHandposeTimelineModule::hasPendingChanges() const
+{
+    const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
+    return widget.IsValid() && widget->hasPendingChanges();
+}
+
 bool FHandposeTimelineModule::hasAssignments() const
 {
     const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();

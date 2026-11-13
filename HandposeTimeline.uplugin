@@ -29,6 +29,11 @@
   ],
   "Modules": [
     {
+      "Name": "AnimationPlacement",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    },
+    {
       "Name": "HandshapeSegmentationAdapter",
       "Type": "Editor",
       "LoadingPhase": "Default"

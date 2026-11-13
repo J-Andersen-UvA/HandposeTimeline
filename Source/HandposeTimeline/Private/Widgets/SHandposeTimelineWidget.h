@@ -9,6 +9,7 @@
 #include "HandposeTimelineConfig.h" 
 
 class FHandposeTimelinePlaybackController;
+class AActor;
 class SScrollBox;
 class SHandposeTimelineTrack;
 class STextBlock;
@@ -45,6 +46,7 @@ public:
     void loadAnimation(UAnimSequenceBase* animation);
     void resetSession();
     bool canBakeCurrentAnimation() const;
+    bool hasPendingChanges() const;
     bool hasAssignments() const;
     bool hasCustomPlaybackRange() const;
     void getPlaybackRange(int32& startFrame, int32& endFrame) const;
@@ -60,6 +62,7 @@ private:
     FReply onLoadConfigClicked();
     FReply onUseSelectedActorClicked();
     FReply onFaceTouchCorrectionModeClicked();
+    FReply onRotate180Clicked();
     FReply onLoopAllClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
@@ -114,6 +117,8 @@ private:
     void loadConfig(UHandposeTimelineConfig* config);
     void restoreLastConfig();
     void saveLastConfig(const UHandposeTimelineConfig& config) const;
+    void restoreLastActor();
+    void saveLastActor(const AActor& actor) const;
     void selectSegment(EHandposeSide handSide, int32 segmentIndex, bool shouldPreview);
     void openHandshapePicker(EHandposeSide handSide, int32 segmentIndex);
     void rebuildPreviewAnimation(bool preserveTime);
@@ -170,6 +175,7 @@ private:
     int32 trimStartFrame = 0;
     int32 trimEndFrame = 0;
     bool faceTouchCorrectionModeEnabled = false;
+    bool rotate180Enabled = false;
     TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
     TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;
     TSharedPtr<SHandposeTimelineTrack> leftTimelineTrack;

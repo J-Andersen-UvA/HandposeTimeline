@@ -10,6 +10,9 @@ public class AnimationPlacement : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new[]
             {
+                "AdditiveBoneCorrection",
+                "AdditiveBoneCorrectionEditor",
+                "AnimationBlueprintLibrary",
                 "Core",
                 "CoreUObject",
                 "Engine"

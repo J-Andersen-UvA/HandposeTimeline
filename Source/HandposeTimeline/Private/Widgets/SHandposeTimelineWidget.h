@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AnimationPlacementService.h"
 #include "FaceTouchCorrectionTypes.h"
 #include "HandposeAssignment.h"
 #include "HandshapeCandidate.h"
@@ -63,6 +64,7 @@ private:
     FReply onUseSelectedActorClicked();
     FReply onFaceTouchCorrectionModeClicked();
     FReply onRotate180Clicked();
+    FReply onAnimationPlacementClicked();
     FReply onLoopAllClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
@@ -119,6 +121,10 @@ private:
     void saveLastConfig(const UHandposeTimelineConfig& config) const;
     void restoreLastActor();
     void saveLastActor(const AActor& actor) const;
+    void restoreAnimationPlacementSettings();
+    void saveAnimationPlacementSettings() const;
+    void applyAnimationPlacementSettings(
+        const struct FAnimationPlacementEditorSettings& settings);
     void selectSegment(EHandposeSide handSide, int32 segmentIndex, bool shouldPreview);
     void openHandshapePicker(EHandposeSide handSide, int32 segmentIndex);
     void rebuildPreviewAnimation(bool preserveTime);
@@ -176,11 +182,16 @@ private:
     int32 trimEndFrame = 0;
     bool faceTouchCorrectionModeEnabled = false;
     bool rotate180Enabled = false;
+    bool animationPlacementEnabled = false;
+    TWeakObjectPtr<AActor> groundPlaneActor;
+    FAnimationPlacementLegChain leftLegPlacement;
+    FAnimationPlacementLegChain rightLegPlacement;
     TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
     TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;
     TSharedPtr<SHandposeTimelineTrack> leftTimelineTrack;
     TWeakPtr<SWindow> handshapePickerWindow;
     TWeakPtr<SWindow> faceTouchPointPickerWindow;
+    TWeakPtr<SWindow> animationPlacementWindow;
     FFaceTouchSurfaceLocation pendingFaceTouchSurfaceLocation;
     EHandposeSide pendingFaceTouchHandSide = EHandposeSide::Right;
     int32 pendingFaceTouchFrame = INDEX_NONE;

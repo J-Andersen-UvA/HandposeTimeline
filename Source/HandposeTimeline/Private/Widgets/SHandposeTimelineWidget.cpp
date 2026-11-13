@@ -11,6 +11,8 @@
 #include "DesktopPlatformModule.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "FaceTouchCorrectionEditorModule.h"
 #include "GameFramework/Actor.h"
 #include "HandshapeSegmentationBlueprintLibrary.h"
@@ -45,6 +47,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/SHandshapePickerWidget.h"
+#include "Widgets/SAnimationPlacementSettingsWidget.h"
 #include "Widgets/SHandposeFingerSelectionWidget.h"
 #include "Widgets/SHandposeTimelineTrack.h"
 #include "Widgets/SWindow.h"
@@ -62,6 +65,38 @@ const TCHAR* configPersistenceSection = TEXT("HandposeTimeline");
 const TCHAR* configPersistenceKey = TEXT("LastConfigAsset");
 const TCHAR* rotate180PersistenceKey = TEXT("Rotate180Enabled");
 const TCHAR* actorPersistenceKey = TEXT("LastPreviewActor");
+const TCHAR* placementEnabledPersistenceKey = TEXT("GroundPlacementEnabled");
+const TCHAR* groundPlanePersistenceKey = TEXT("GroundPlaneActor");
+const TCHAR* leftLegChainPersistenceKey = TEXT("LeftLegIkChain");
+const TCHAR* rightLegChainPersistenceKey = TEXT("RightLegIkChain");
+const TCHAR* leftToePersistenceKey = TEXT("LeftToeBone");
+const TCHAR* rightToePersistenceKey = TEXT("RightToeBone");
+
+FString formatBoneNames(const TArray<FName>& boneNames)
+{
+    TArray<FString> values;
+    for (const FName boneName : boneNames)
+    {
+        values.Add(boneName.ToString());
+    }
+    return FString::Join(values, TEXT(","));
+}
+
+TArray<FName> parseBoneNames(const FString& value)
+{
+    TArray<FString> values;
+    value.ParseIntoArray(values, TEXT(","), true);
+    TArray<FName> names;
+    for (FString& boneName : values)
+    {
+        boneName.TrimStartAndEndInline();
+        if (!boneName.IsEmpty())
+        {
+            names.Add(FName(*boneName));
+        }
+    }
+    return names;
+}
 
 FString handSideToString(const EHandposeSide handSide)
 {
@@ -276,6 +311,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
         rotate180PersistenceKey,
         rotate180Enabled,
         GEditorPerProjectIni);
+    restoreAnimationPlacementSettings();
     TSharedPtr<SHandposeTimelineVerticalScrollBox> verticalTimelineScrollBox;
 
     const auto makeToolbarButton = [](
@@ -337,6 +373,15 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             {
                 return FSlateColor(
                     rotate180Enabled
+                        ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                        : FLinearColor::White);
+            });
+    const TAttribute<FSlateColor> animationPlacementButtonColor =
+        TAttribute<FSlateColor>::CreateLambda(
+            [this]()
+            {
+                return FSlateColor(
+                    animationPlacementEnabled
                         ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
                         : FLinearColor::White);
             });
@@ -475,6 +520,21 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                     this,
                                     &SHandposeTimelineWidget::onRotate180Clicked),
                                 rotate180ButtonColor)
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            makeToolbarButton(
+                                TEXT("Icons.Transform"),
+                                LOCTEXT("AnimationPlacement", "Place Feet"),
+                                LOCTEXT(
+                                    "AnimationPlacementTooltip",
+                                    "Configure trim-start leg IK against a persistent ground plane."),
+                                FOnClicked::CreateSP(
+                                    this,
+                                    &SHandposeTimelineWidget::onAnimationPlacementClicked),
+                                animationPlacementButtonColor)
                         ]
                     ]
                 ]
@@ -900,6 +960,10 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
     refreshTimeline();
     restoreLastConfig();
     restoreLastActor();
+    if (animationPlacementEnabled && loadedAnimation.IsValid())
+    {
+        rebuildPreviewAnimation(false);
+    }
 }
 
 void SHandposeTimelineWidget::Tick(
@@ -1045,6 +1109,10 @@ FReply SHandposeTimelineWidget::onUseSelectedActorClicked()
         statusText->SetText(FText::Format(
             LOCTEXT("PreviewActorSelected", "Using {0} for segment previews."),
             FText::FromString(selectedActor->GetActorLabel())));
+        if (animationPlacementEnabled && loadedAnimation.IsValid())
+        {
+            rebuildPreviewAnimation(true);
+        }
         if (faceTouchCorrectionModeEnabled)
         {
             IFaceTouchCorrectionEditorModule::get().beginFacePicking(
@@ -1104,6 +1172,43 @@ FReply SHandposeTimelineWidget::onRotate180Clicked()
     statusText->SetText(rotate180Enabled
         ? LOCTEXT("Rotate180Enabled", "Rotate 180 is enabled.")
         : LOCTEXT("Rotate180Disabled", "Rotate 180 is disabled."));
+    return FReply::Handled();
+}
+
+FReply SHandposeTimelineWidget::onAnimationPlacementClicked()
+{
+    if (const TSharedPtr<SWindow> existingWindow = animationPlacementWindow.Pin())
+    {
+        existingWindow->BringToFront(true);
+        return FReply::Handled();
+    }
+
+    FAnimationPlacementEditorSettings initialSettings;
+    initialSettings.enabled = animationPlacementEnabled;
+    initialSettings.groundPlaneActor = groundPlaneActor;
+    initialSettings.leftLeg = leftLegPlacement;
+    initialSettings.rightLeg = rightLegPlacement;
+
+    const TSharedRef<SWindow> window = SNew(SWindow)
+        .Title(LOCTEXT("AnimationPlacementTitle", "Animation Placement"))
+        .ClientSize(FVector2D(560.0f, 285.0f))
+        .SupportsMaximize(false)
+        .SupportsMinimize(false);
+    animationPlacementWindow = window;
+    window->SetContent(
+        SNew(SAnimationPlacementSettingsWidget)
+        .InitialSettings(initialSettings)
+        .OwnerWindow(window)
+        .OnSettingsAccepted(
+            FOnAnimationPlacementSettingsAccepted::CreateSP(
+                this,
+                &SHandposeTimelineWidget::applyAnimationPlacementSettings)));
+    window->SetOnWindowClosed(FOnWindowClosed::CreateLambda(
+        [this](const TSharedRef<SWindow>&)
+        {
+            animationPlacementWindow.Reset();
+        }));
+    FSlateApplication::Get().AddWindow(window);
     return FReply::Handled();
 }
 
@@ -1265,6 +1370,7 @@ bool SHandposeTimelineWidget::hasPendingChanges() const
         !rightFaceTouchCorrections.IsEmpty() ||
         !leftFaceTouchCorrections.IsEmpty() ||
         rotate180Enabled ||
+        animationPlacementEnabled ||
         hasCustomPlaybackRange();
 }
 
@@ -1315,10 +1421,18 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
         errorMessage = TEXT("Make a timeline change before baking.");
         return false;
     }
-    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled) &&
+    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled ||
+            animationPlacementEnabled) &&
         !previewAnimation.IsValid())
     {
         rebuildPreviewAnimation(false);
+    }
+    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled ||
+            animationPlacementEnabled) &&
+        !previewAnimation.IsValid())
+    {
+        errorMessage = TEXT("The preview could not be built. Resolve the timeline status error before baking.");
+        return false;
     }
 
     const FHandposeBakeResult result = FHandposeBakeService::bake(
@@ -1952,6 +2066,10 @@ void SHandposeTimelineWidget::setTrimStartAtPlayhead()
         LOCTEXT("TrimStartSet", "Trim start set to frame {0}."),
         FText::AsNumber(trimStartFrame)));
     refreshTimeline();
+    if (animationPlacementEnabled)
+    {
+        rebuildPreviewAnimation(true);
+    }
 }
 
 void SHandposeTimelineWidget::setTrimEndAtPlayhead()
@@ -2051,7 +2169,7 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
             "Generated {0} right-hand segments and {1} left-hand segments."),
         FText::AsNumber(rightSegments.Num()),
         FText::AsNumber(leftSegments.Num())));
-    if (rotate180Enabled)
+    if (rotate180Enabled || animationPlacementEnabled)
     {
         rebuildPreviewAnimation(false);
     }
@@ -2276,6 +2394,133 @@ void SHandposeTimelineWidget::saveLastActor(const AActor& actor) const
         *actor.GetPathName(),
         GEditorPerProjectIni);
     GConfig->Flush(false, GEditorPerProjectIni);
+}
+
+void SHandposeTimelineWidget::restoreAnimationPlacementSettings()
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+    GConfig->GetBool(
+        configPersistenceSection,
+        placementEnabledPersistenceKey,
+        animationPlacementEnabled,
+        GEditorPerProjectIni);
+
+    FString value;
+    if (GConfig->GetString(
+            configPersistenceSection,
+            groundPlanePersistenceKey,
+            value,
+            GEditorPerProjectIni))
+    {
+        groundPlaneActor = Cast<AActor>(FSoftObjectPath(value).ResolveObject());
+    }
+    if (GConfig->GetString(
+            configPersistenceSection,
+            leftLegChainPersistenceKey,
+            value,
+            GEditorPerProjectIni))
+    {
+        leftLegPlacement.bones = parseBoneNames(value);
+    }
+    if (GConfig->GetString(
+            configPersistenceSection,
+            rightLegChainPersistenceKey,
+            value,
+            GEditorPerProjectIni))
+    {
+        rightLegPlacement.bones = parseBoneNames(value);
+    }
+    if (leftLegPlacement.bones.IsEmpty())
+    {
+        leftLegPlacement.bones = {TEXT("thigh_l"), TEXT("calf_l"), TEXT("foot_l")};
+    }
+    if (rightLegPlacement.bones.IsEmpty())
+    {
+        rightLegPlacement.bones = {TEXT("thigh_r"), TEXT("calf_r"), TEXT("foot_r")};
+    }
+    if (GConfig->GetString(
+            configPersistenceSection,
+            leftToePersistenceKey,
+            value,
+            GEditorPerProjectIni))
+    {
+        leftLegPlacement.toeBone = FName(*value);
+    }
+    if (GConfig->GetString(
+            configPersistenceSection,
+            rightToePersistenceKey,
+            value,
+            GEditorPerProjectIni))
+    {
+        rightLegPlacement.toeBone = FName(*value);
+    }
+    if (leftLegPlacement.toeBone.IsNone())
+    {
+        leftLegPlacement.toeBone = TEXT("ball_l");
+    }
+    if (rightLegPlacement.toeBone.IsNone())
+    {
+        rightLegPlacement.toeBone = TEXT("ball_r");
+    }
+}
+
+void SHandposeTimelineWidget::saveAnimationPlacementSettings() const
+{
+    if (GConfig == nullptr)
+    {
+        return;
+    }
+    GConfig->SetBool(
+        configPersistenceSection,
+        placementEnabledPersistenceKey,
+        animationPlacementEnabled,
+        GEditorPerProjectIni);
+    GConfig->SetString(
+        configPersistenceSection,
+        groundPlanePersistenceKey,
+        groundPlaneActor.IsValid() ? *groundPlaneActor->GetPathName() : TEXT(""),
+        GEditorPerProjectIni);
+    GConfig->SetString(
+        configPersistenceSection,
+        leftLegChainPersistenceKey,
+        *formatBoneNames(leftLegPlacement.bones),
+        GEditorPerProjectIni);
+    GConfig->SetString(
+        configPersistenceSection,
+        rightLegChainPersistenceKey,
+        *formatBoneNames(rightLegPlacement.bones),
+        GEditorPerProjectIni);
+    GConfig->SetString(
+        configPersistenceSection,
+        leftToePersistenceKey,
+        *leftLegPlacement.toeBone.ToString(),
+        GEditorPerProjectIni);
+    GConfig->SetString(
+        configPersistenceSection,
+        rightToePersistenceKey,
+        *rightLegPlacement.toeBone.ToString(),
+        GEditorPerProjectIni);
+    GConfig->Flush(false, GEditorPerProjectIni);
+}
+
+void SHandposeTimelineWidget::applyAnimationPlacementSettings(
+    const FAnimationPlacementEditorSettings& settings)
+{
+    animationPlacementEnabled = settings.enabled;
+    groundPlaneActor = settings.groundPlaneActor;
+    leftLegPlacement = settings.leftLeg;
+    rightLegPlacement = settings.rightLeg;
+    saveAnimationPlacementSettings();
+    if (loadedAnimation.IsValid())
+    {
+        rebuildPreviewAnimation(true);
+    }
+    statusText->SetText(animationPlacementEnabled
+        ? LOCTEXT("AnimationPlacementEnabled", "Ground placement is enabled.")
+        : LOCTEXT("AnimationPlacementDisabled", "Ground placement is disabled."));
 }
 
 void SHandposeTimelineWidget::selectSegment(
@@ -2603,7 +2848,8 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     if (sourceAnimation == nullptr ||
         (assignments.IsEmpty() &&
             faceTouchCorrections.IsEmpty() &&
-            !rotate180Enabled))
+            !rotate180Enabled &&
+            !animationPlacementEnabled))
     {
         previewAnimation.Reset();
         playbackController->setAnimation(loadedAnimation.Get());
@@ -2612,6 +2858,9 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     }
 
     const float previousTime = preserveTime ? getCurrentTimeSeconds() : 0.0f;
+    previewAnimation.Reset();
+    playbackController->setAnimation(loadedAnimation.Get());
+    applyPlaybackRange();
     const TArray<FName> rightBoneNames = loadedConfig.IsValid()
         ? loadedConfig->getApplyBoneNames(EHandposeSide::Right)
         : getSegmentationBoneNames(*sourceAnimation, EHandposeSide::Right);
@@ -2633,6 +2882,46 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
             return;
         }
         previewSource = rotationResult.animation;
+    }
+    if (animationPlacementEnabled)
+    {
+        AActor* previewActor = playbackController->getActor();
+        USkeletalMeshComponent* skeletalMeshComponent = previewActor != nullptr
+            ? previewActor->FindComponentByClass<USkeletalMeshComponent>()
+            : nullptr;
+        AActor* planeActor = groundPlaneActor.Get();
+        if (skeletalMeshComponent == nullptr ||
+            skeletalMeshComponent->GetSkeletalMeshAsset() == nullptr ||
+            planeActor == nullptr)
+        {
+            statusText->SetText(LOCTEXT(
+                "AnimationPlacementMissingSetup",
+                "Ground placement needs a preview actor with a skeletal mesh and a ground-plane actor."));
+            return;
+        }
+        FAnimationGroundSettings placementSettings;
+        placementSettings.solveFrame = trimStartFrame;
+        placementSettings.skeletalMeshComponentTransform =
+            skeletalMeshComponent->GetComponentTransform();
+        placementSettings.planeWorldPoint = planeActor->GetActorLocation();
+        placementSettings.planeWorldNormal = planeActor->GetActorUpVector();
+        placementSettings.leftLeg = leftLegPlacement;
+        placementSettings.rightLeg = rightLegPlacement;
+        const FAnimationPlacementResult placementResult =
+            FAnimationPlacementService::placeFeetOnGround(
+                previewSource,
+                skeletalMeshComponent->GetSkeletalMeshAsset(),
+                placementSettings);
+        if (!placementResult.success || placementResult.animation == nullptr)
+        {
+            statusText->SetText(FText::Format(
+                LOCTEXT(
+                    "AnimationPlacementBuildFailed",
+                    "Could not place the animation on the ground: {0}"),
+                FText::FromString(placementResult.errorMessage)));
+            return;
+        }
+        previewSource = placementResult.animation;
     }
     if (!assignments.IsEmpty())
     {

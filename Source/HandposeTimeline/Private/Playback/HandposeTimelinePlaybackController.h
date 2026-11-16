@@ -39,6 +39,8 @@ public:
     AActor* getActor() const;
     float getCurrentTimeSeconds() const;
     float getPlayRate() const;
+    double getEffectivePlayRate() const;
+    uint64 getPlaybackRevision() const;
     bool isPlaying() const;
     bool shouldLoopAll() const;
 
@@ -58,4 +60,5 @@ private:
     bool isPreviewingSegment = false;
     bool isPlayingTimeline = false;
     bool loopAll = false;
+    uint64 playbackRevision = 0;
 };

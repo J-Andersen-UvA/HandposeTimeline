@@ -32,6 +32,7 @@ public class HandposeTimeline : ModuleRules
                 "HandshapeSegmentationAdapter",
                 "HandposeTimelineDecisionData",
                 "InputCore",
+                "PropertyEditor",
                 "SemanticPatchProximity",
                 "Slate",
                 "SlateCore",

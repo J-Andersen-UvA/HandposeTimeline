@@ -36,6 +36,7 @@ void FHandposeTimelinePlaybackController::tick()
             previewComponent->SetPlayRate(playRate);
             previewComponent->Play(false);
             currentTimeSeconds = playbackStartTimeSeconds;
+            ++playbackRevision;
         }
         else
         {
@@ -132,6 +133,7 @@ EHandposeTimelinePlaybackResult FHandposeTimelinePlaybackController::playTimelin
     previewComponent->SetPlayRate(playRate);
     isPreviewingSegment = false;
     isPlayingTimeline = true;
+    ++playbackRevision;
     return EHandposeTimelinePlaybackResult::Success;
 }
 
@@ -171,6 +173,7 @@ EHandposeTimelinePlaybackResult FHandposeTimelinePlaybackController::previewSegm
     currentTimeSeconds = previewStartTimeSeconds;
     isPreviewingSegment = true;
     isPlayingTimeline = false;
+    ++playbackRevision;
     return EHandposeTimelinePlaybackResult::Success;
 }
 
@@ -255,6 +258,17 @@ float FHandposeTimelinePlaybackController::getCurrentTimeSeconds() const
 float FHandposeTimelinePlaybackController::getPlayRate() const
 {
     return playRate;
+}
+
+double FHandposeTimelinePlaybackController::getEffectivePlayRate() const
+{
+    const UAnimSequenceBase* loadedAnimation = animation.Get();
+    return playRate * (loadedAnimation ? loadedAnimation->RateScale : 1.0f);
+}
+
+uint64 FHandposeTimelinePlaybackController::getPlaybackRevision() const
+{
+    return playbackRevision;
 }
 
 bool FHandposeTimelinePlaybackController::isPlaying() const

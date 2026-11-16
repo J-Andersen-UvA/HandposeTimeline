@@ -12,6 +12,7 @@
 #include "Editor.h"
 #include "Engine/Selection.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/AudioComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "FaceTouchCorrectionEditorModule.h"
 #include "GameFramework/Actor.h"
@@ -296,6 +297,7 @@ private:
 
 SHandposeTimelineWidget::~SHandposeTimelineWidget()
 {
+    resetWording();
     if (!IsEngineExitRequested() &&
         FModuleManager::Get().IsModuleLoaded(TEXT("FaceTouchCorrectionEditor")))
     {
@@ -535,6 +537,18 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                     this,
                                     &SHandposeTimelineWidget::onAnimationPlacementClicked),
                                 animationPlacementButtonColor)
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SBox)
+                            .Visibility_Lambda([] { return Wording::available() ? EVisibility::Visible : EVisibility::Collapsed; })
+                            [
+                                SNew(SButton)
+                                .Text(LOCTEXT("CorrectWording", "Correct Wording"))
+                                .OnClicked(this, &SHandposeTimelineWidget::onCorrectWordingClicked)
+                            ]
                         ]
                     ]
                 ]
@@ -918,6 +932,10 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 ]
                 + SScrollBox::Slot()
                 [
+                    makeWordingLane()
+                ]
+                + SScrollBox::Slot()
+                [
                     SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
                     .HandSide(EHandposeSide::Left)
                     .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
@@ -973,6 +991,7 @@ void SHandposeTimelineWidget::Tick(
 {
     SCompoundWidget::Tick(allottedGeometry, currentTime, deltaTime);
     playbackController->tick();
+    updateWordingAudio();
 }
 
 FReply SHandposeTimelineWidget::OnPreviewKeyDown(
@@ -1221,6 +1240,7 @@ FReply SHandposeTimelineWidget::onLoopAllClicked()
 FReply SHandposeTimelineWidget::onSpeedClicked()
 {
     const float playRate = playbackController->cyclePlayRate();
+    updateWordingAudio();
     const FText speedLabel = FMath::IsNearlyEqual(playRate, 1.0f)
         ? LOCTEXT("PreviewSpeedOne", "Speed: 1x")
         : FText::Format(
@@ -1235,11 +1255,13 @@ FReply SHandposeTimelineWidget::onPlayPauseClicked()
     if (playbackController->isPlaying())
     {
         playbackController->pause();
+        stopWordingAudio();
         return FReply::Handled();
     }
 
     const EHandposeTimelinePlaybackResult result =
         playbackController->playTimeline();
+    updateWordingAudio();
     if (result == EHandposeTimelinePlaybackResult::MissingAnimationOrActor)
     {
         statusText->SetText(LOCTEXT(
@@ -1367,6 +1389,7 @@ bool SHandposeTimelineWidget::canBakeCurrentAnimation() const
 bool SHandposeTimelineWidget::hasPendingChanges() const
 {
     return hasAssignments() ||
+        hasWording() ||
         !rightFaceTouchCorrections.IsEmpty() ||
         !leftFaceTouchCorrections.IsEmpty() ||
         rotate180Enabled ||
@@ -1421,13 +1444,13 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
         errorMessage = TEXT("Make a timeline change before baking.");
         return false;
     }
-    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled ||
+    if ((hasAssignments() || hasFaceTouchCorrections || hasWording() || rotate180Enabled ||
             animationPlacementEnabled) &&
         !previewAnimation.IsValid())
     {
         rebuildPreviewAnimation(false);
     }
-    if ((hasAssignments() || hasFaceTouchCorrections || rotate180Enabled ||
+    if ((hasAssignments() || hasFaceTouchCorrections || hasWording() || rotate180Enabled ||
             animationPlacementEnabled) &&
         !previewAnimation.IsValid())
     {
@@ -2111,6 +2134,7 @@ void SHandposeTimelineWidget::removeSelectedFaceTouchCorrection()
 void SHandposeTimelineWidget::onPlayheadScrubbed(const float timeSeconds)
 {
     playbackController->scrubTo(timeSeconds);
+    stopWordingAudio();
 }
 
 void SHandposeTimelineWidget::stepFrame(const int32 frameOffset)
@@ -2191,6 +2215,7 @@ void SHandposeTimelineWidget::onZoomWheel(const float wheelDelta)
 
 void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 {
+    resetWording();
     loadedAnimation = animation;
     previewAnimation.Reset();
     playbackController->setAnimation(animation);
@@ -2254,6 +2279,7 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 
 void SHandposeTimelineWidget::resetSession()
 {
+    resetWording();
     if (const TSharedPtr<SWindow> pickerWindow = handshapePickerWindow.Pin())
     {
         pickerWindow->RequestDestroyWindow();
@@ -2916,6 +2942,7 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
 
 void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
 {
+    stopWordingAudio();
     UAnimSequence* sourceAnimation = Cast<UAnimSequence>(loadedAnimation.Get());
     const TArray<FHandposeAssignment> assignments = getAllAssignments();
     TArray<FFaceTouchCorrectionBlock> faceTouchCorrections =
@@ -2924,6 +2951,7 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     if (sourceAnimation == nullptr ||
         (assignments.IsEmpty() &&
             faceTouchCorrections.IsEmpty() &&
+            !hasWording() &&
             !rotate180Enabled &&
             !animationPlacementEnabled))
     {
@@ -3039,6 +3067,20 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
         previewSource = faceTouchResult.animation;
     }
 
+    if (hasWording())
+    {
+        FString error;
+        UAnimSequence* wordingPreview = Wording::apply(
+            *previewSource, wordingBlocks, wordingFaceMap.Get(), wordingTongueMap.Get(),
+            wordingChannelOverrides, wordingOverwriteAll, error);
+        if (!wordingPreview)
+        {
+            statusText->SetText(FText::FromString(error));
+            return;
+        }
+        previewSource = wordingPreview;
+    }
+
     previewAnimation.Reset(previewSource);
     playbackController->setAnimation(previewAnimation.Get());
     applyPlaybackRange();
@@ -3113,6 +3155,7 @@ void SHandposeTimelineWidget::updateAssignmentCoverage(
 
 void SHandposeTimelineWidget::refreshTimeline()
 {
+    refreshWording();
     if (rightTimelineTrack.IsValid())
     {
         rightTimelineTrack->setTimeline(

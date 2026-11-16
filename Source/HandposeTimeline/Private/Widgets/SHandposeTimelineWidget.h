@@ -7,6 +7,9 @@
 #include "HandposeTimelineSegment.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Engine/DataTable.h"
+#include "Timeline/HandposeTimelineLayout.h"
+#include "Wording/WordingService.h"
 #include "HandposeTimelineConfig.h" 
 
 class FHandposeTimelinePlaybackController;
@@ -16,6 +19,7 @@ class SHandposeTimelineTrack;
 class STextBlock;
 class SWindow;
 class UAnimSequence;
+class UAudioComponent;
 class UAnimSequenceBase;
 class UHandposeTimelineConfig;
 struct FHandposeDecisionDataResult;
@@ -65,6 +69,18 @@ private:
     FReply onFaceTouchCorrectionModeClicked();
     FReply onRotate180Clicked();
     FReply onAnimationPlacementClicked();
+    FReply onCorrectWordingClicked();
+    TSharedRef<SWidget> makeWordingLane();
+    void refreshWording();
+    void resetWording();
+    void updateWordingAudio();
+    void stopWordingAudio();
+    void openWordingBlock(double time, int32 index);
+    void deleteWordingBlock(int32 index);
+    void openVisemeMarker(double time, int32 blockIndex);
+    bool commitWording(FWordingBlock block, int32 index, FString& error);
+    EActiveTimerReturnType pollWording(double currentTime, float deltaTime);
+    bool hasWording() const;
     FReply onLoopAllClicked();
     FReply onSpeedClicked();
     FReply onPlayPauseClicked();
@@ -181,6 +197,24 @@ private:
     float timelineZoom = 1.0f;
     int32 trimStartFrame = 0;
     int32 trimEndFrame = 0;
+    bool wordingEnabled = false;
+    bool wordingOverwriteAll = false;
+    FHandposeTimelineLayout wordingLayout;
+    TArray<FWordingBlock> wordingBlocks;
+    TMap<FName, bool> wordingChannelOverrides;
+    TStrongObjectPtr<UObject> wordingVoice;
+    TStrongObjectPtr<UDataTable> wordingFaceMap;
+    TStrongObjectPtr<UDataTable> wordingTongueMap;
+    TStrongObjectPtr<UObject> wordingJob;
+    FWordingBlock pendingWording;
+    TStrongObjectPtr<UAudioComponent> wordingAudioComponent;
+    int32 wordingAudioBlockIndex = INDEX_NONE;
+    uint64 wordingAudioPlaybackRevision = 0;
+    double wordingAudioPlayRate = 0.0;
+    int32 pendingWordingIndex = INDEX_NONE;
+    TSharedPtr<SWidget> wordingLane;
+    TWeakPtr<SWindow> wordingSettingsWindow;
+    TWeakPtr<SWindow> wordingBlockWindow;
     bool faceTouchCorrectionModeEnabled = false;
     bool rotate180Enabled = false;
     bool animationPlacementEnabled = false;

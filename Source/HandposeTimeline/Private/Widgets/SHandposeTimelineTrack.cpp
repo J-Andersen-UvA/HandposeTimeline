@@ -53,13 +53,6 @@ void SHandposeTimelineTrack::Construct(const FArguments& arguments)
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     [
-                        SAssignNew(frameRuler, SHandposeTimelineRuler)
-                        .CurrentTimeSeconds(currentTimeSeconds)
-                        .OnScrubbed(this, &SHandposeTimelineTrack::onPlayheadScrubbed)
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    [
                         SAssignNew(blockContainer, SHorizontalBox)
                     ]
                     + SVerticalBox::Slot()
@@ -164,10 +157,6 @@ void SHandposeTimelineTrack::setTimeline(
             assignments[selectedAssignmentIndex].sourceSegmentIndex);
     }
     layout.setTimeline(animation, segments, zoom);
-    if (frameRuler.IsValid())
-    {
-        frameRuler->setTimeline(animation, segments, zoom);
-    }
     if (playheadOverlay.IsValid())
     {
         playheadOverlay->setTimeline(

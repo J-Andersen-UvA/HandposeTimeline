@@ -125,6 +125,5 @@ private:
     TSharedPtr<SHandposeAssignmentLane> assignmentLane;
     TSharedPtr<SVerticalBox> faceTouchCorrectionContainer;
     TSharedPtr<SFaceTouchCorrectionLane> faceTouchCorrectionLane;
-    TSharedPtr<SHandposeTimelineRuler> frameRuler;
     TSharedPtr<SHandposeTimelinePlayheadOverlay> playheadOverlay;
 };

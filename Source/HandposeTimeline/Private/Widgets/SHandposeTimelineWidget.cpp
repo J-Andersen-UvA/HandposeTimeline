@@ -23,6 +23,8 @@
 #include "HandposeAsset.h"
 #include "HandposeDecisionDataService.h"
 #include "HandposeTimelineConfig.h"
+#include "HandposeTimelineExtension.h"
+#include "HandposeTimelineModule.h"
 #include "IContentBrowserSingleton.h"
 #include "IDesktopPlatform.h"
 #include "InputCoreTypes.h"
@@ -550,6 +552,12 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                 .OnClicked(this, &SHandposeTimelineWidget::onCorrectWordingClicked)
                             ]
                         ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        [
+                            SAssignNew(extensionToolbarBox, SVerticalBox)
+                        ]
                     ]
                 ]
             ]
@@ -936,6 +944,10 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                 ]
                 + SScrollBox::Slot()
                 [
+                    SAssignNew(extensionLaneBox, SVerticalBox)
+                ]
+                + SScrollBox::Slot()
+                [
                     SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
                     .HandSide(EHandposeSide::Left)
                     .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
@@ -975,6 +987,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             }
         });
 
+    rebuildExtensions();
     refreshTimeline();
     restoreLastConfig();
     restoreLastActor();
@@ -992,6 +1005,115 @@ void SHandposeTimelineWidget::Tick(
     SCompoundWidget::Tick(allottedGeometry, currentTime, deltaTime);
     playbackController->tick();
     updateWordingAudio();
+    refreshExtensions();
+}
+
+void SHandposeTimelineWidget::rebuildExtensions()
+{
+    if (!extensionToolbarBox.IsValid() || !extensionLaneBox.IsValid())
+    {
+        return;
+    }
+
+    extensionToolbarBox->ClearChildren();
+    extensionLaneBox->ClearChildren();
+
+    const IHandposeTimelineModule* module =
+        FModuleManager::GetModulePtr<IHandposeTimelineModule>(TEXT("HandposeTimeline"));
+    if (module == nullptr)
+    {
+        return;
+    }
+
+    for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
+    {
+        const TWeakPtr<IHandposeTimelineExtension> weakExtension = extension;
+        extensionToolbarBox->AddSlot()
+        .AutoHeight()
+        [
+            SNew(SButton)
+            .Text(extension->getDisplayName())
+            .ToolTipText(extension->getTooltip())
+            .ButtonColorAndOpacity(TAttribute<FSlateColor>::CreateLambda(
+                [weakExtension]()
+                {
+                    const TSharedPtr<IHandposeTimelineExtension> pinned = weakExtension.Pin();
+                    return FSlateColor(
+                        pinned.IsValid() && pinned->isEnabled()
+                            ? FLinearColor(0.05f, 0.4f, 0.75f, 1.0f)
+                            : FLinearColor::White);
+                }))
+            .OnClicked(FOnClicked::CreateSP(
+                this,
+                &SHandposeTimelineWidget::onExtensionToggleClicked,
+                extension))
+        ];
+
+        extensionLaneBox->AddSlot()
+        .AutoHeight()
+        [
+            SNew(SBox)
+            .Visibility_Lambda(
+                [weakExtension]()
+                {
+                    const TSharedPtr<IHandposeTimelineExtension> pinned = weakExtension.Pin();
+                    return pinned.IsValid() && pinned->isEnabled()
+                        ? EVisibility::Visible
+                        : EVisibility::Collapsed;
+                })
+            [
+                extension->createLane()
+            ]
+        ];
+    }
+
+    refreshExtensions();
+}
+
+void SHandposeTimelineWidget::refreshExtensions()
+{
+    const IHandposeTimelineModule* module =
+        FModuleManager::GetModulePtr<IHandposeTimelineModule>(TEXT("HandposeTimeline"));
+    if (module == nullptr)
+    {
+        return;
+    }
+
+    FHandposeTimelineExtensionContext context;
+    context.animation = loadedAnimation;
+    context.lastFrame = loadedAnimation.IsValid()
+        ? FMath::Max(0, loadedAnimation->GetNumberOfSampledKeys() - 1)
+        : 0;
+    context.frameRate = loadedAnimation.IsValid()
+        ? loadedAnimation->GetSamplingFrameRate()
+        : FFrameRate();
+    context.trimStartFrame = trimStartFrame;
+    context.trimEndFrame = trimEndFrame;
+    context.currentFrame = getCurrentFrame();
+    context.pixelsPerFrame = context.frameRate.IsValid()
+        ? 180.0f * timelineZoom / static_cast<float>(context.frameRate.AsDecimal())
+        : 1.0f;
+    const TWeakPtr<SHandposeTimelineWidget> weakWidget = SharedThis(this);
+    context.setStatus = [weakWidget](const FText& text)
+    {
+        if (const TSharedPtr<SHandposeTimelineWidget> widget = weakWidget.Pin())
+        {
+            widget->statusText->SetText(text);
+        }
+    };
+
+    for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
+    {
+        extension->updateContext(context);
+    }
+}
+
+FReply SHandposeTimelineWidget::onExtensionToggleClicked(
+    const TSharedRef<IHandposeTimelineExtension> extension)
+{
+    extension->setEnabled(!extension->isEnabled());
+    refreshExtensions();
+    return FReply::Handled();
 }
 
 FReply SHandposeTimelineWidget::OnPreviewKeyDown(

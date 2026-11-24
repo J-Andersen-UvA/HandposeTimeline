@@ -139,6 +139,36 @@ UAnimSequenceBase* FHandposeTimelineModule::getLoadedAnimation() const
     return widget.IsValid() ? widget->getLoadedAnimation() : nullptr;
 }
 
+void FHandposeTimelineModule::registerExtension(
+    const TSharedRef<IHandposeTimelineExtension>& extension)
+{
+    unregisterExtension(extension->getExtensionId());
+    extensions.Add(extension);
+    if (const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin())
+    {
+        widget->rebuildExtensions();
+    }
+}
+
+void FHandposeTimelineModule::unregisterExtension(const FName extensionId)
+{
+    extensions.RemoveAll(
+        [extensionId](const TSharedRef<IHandposeTimelineExtension>& extension)
+        {
+            return extension->getExtensionId() == extensionId;
+        });
+    if (const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin())
+    {
+        widget->rebuildExtensions();
+    }
+}
+
+const TArray<TSharedRef<IHandposeTimelineExtension>>&
+FHandposeTimelineModule::getExtensions() const
+{
+    return extensions;
+}
+
 TSharedRef<SDockTab> FHandposeTimelineModule::spawnHandposeTimelineTab(
     const FSpawnTabArgs& spawnTabArgs)
 {

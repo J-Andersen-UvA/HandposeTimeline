@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Modules/ModuleManager.h"
+#include "HandposeTimelineExtension.h"
 
 class FSpawnTabArgs;
 class SDockTab;
@@ -24,6 +25,10 @@ public:
         FString& errorMessage,
         bool& cancelled) = 0;
     virtual UAnimSequenceBase* getLoadedAnimation() const = 0;
+    virtual void registerExtension(
+        const TSharedRef<IHandposeTimelineExtension>& extension) = 0;
+    virtual void unregisterExtension(FName extensionId) = 0;
+    virtual const TArray<TSharedRef<IHandposeTimelineExtension>>& getExtensions() const = 0;
 };
 
 class FHandposeTimelineModule : public IHandposeTimelineModule
@@ -44,10 +49,15 @@ public:
         FString& errorMessage,
         bool& cancelled) override;
     virtual UAnimSequenceBase* getLoadedAnimation() const override;
+    virtual void registerExtension(
+        const TSharedRef<IHandposeTimelineExtension>& extension) override;
+    virtual void unregisterExtension(FName extensionId) override;
+    virtual const TArray<TSharedRef<IHandposeTimelineExtension>>& getExtensions() const override;
 
 private:
     void registerMenus();
     void openHandposeTimeline();
     TSharedRef<SDockTab> spawnHandposeTimelineTab(const FSpawnTabArgs& spawnTabArgs);
     TWeakPtr<SHandposeTimelineWidget> handposeTimelineWidget;
+    TArray<TSharedRef<IHandposeTimelineExtension>> extensions;
 };

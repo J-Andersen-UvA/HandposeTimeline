@@ -13,10 +13,12 @@
 #include "HandposeTimelineConfig.h" 
 
 class FHandposeTimelinePlaybackController;
+class IHandposeTimelineExtension;
 class AActor;
 class SScrollBox;
 class SHandposeTimelineTrack;
 class STextBlock;
+class SVerticalBox;
 class SWindow;
 class UAnimSequence;
 class UAudioComponent;
@@ -61,6 +63,7 @@ public:
         FString& errorMessage,
         bool& cancelled);
     UAnimSequenceBase* getLoadedAnimation() const;
+    void rebuildExtensions();
 
 private:
     FReply onLoadAnimationClicked();
@@ -169,6 +172,8 @@ private:
     int32& getSelectedFaceTouchCorrectionIndex(EHandposeSide handSide);
     TArray<FHandposeAssignment> getAllAssignments() const;
     void refreshTimeline();
+    void refreshExtensions();
+    FReply onExtensionToggleClicked(TSharedRef<IHandposeTimelineExtension> extension);
     float getCurrentTimeSeconds() const;
     FText getPlayPauseButtonText() const;
     FText getTimecodeText() const;
@@ -222,6 +227,8 @@ private:
     FAnimationPlacementLegChain leftLegPlacement;
     FAnimationPlacementLegChain rightLegPlacement;
     TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
+    TSharedPtr<SVerticalBox> extensionToolbarBox;
+    TSharedPtr<SVerticalBox> extensionLaneBox;
     TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;
     TSharedPtr<SHandposeTimelineTrack> leftTimelineTrack;
     TWeakPtr<SWindow> handshapePickerWindow;

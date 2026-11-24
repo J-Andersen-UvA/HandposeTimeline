@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class SWidget;
+class UAnimSequence;
 class UAnimSequenceBase;
 
 struct FHandposeTimelineExtensionContext
@@ -15,6 +16,8 @@ struct FHandposeTimelineExtensionContext
     int32 currentFrame = 0;
     float pixelsPerFrame = 1.0f;
     TFunction<void(const FText&)> setStatus;
+    TFunction<void(int32)> scrubToFrame;
+    TFunction<void(bool)> requestPreviewRebuild;
 
     float getTotalWidth() const
     {
@@ -47,6 +50,22 @@ public:
     virtual FText getTooltip() const = 0;
     virtual bool isEnabled() const = 0;
     virtual void setEnabled(bool enabled) = 0;
+    virtual void onToolbarClicked()
+    {
+        setEnabled(!isEnabled());
+    }
     virtual TSharedRef<SWidget> createLane() = 0;
     virtual void updateContext(const FHandposeTimelineExtensionContext& context) = 0;
+    virtual bool hasPreviewChanges() const
+    {
+        return false;
+    }
+    virtual UAnimSequence* buildPreview(UAnimSequence& source, FString& errorMessage)
+    {
+        return &source;
+    }
+    virtual bool deleteSelection()
+    {
+        return false;
+    }
 };

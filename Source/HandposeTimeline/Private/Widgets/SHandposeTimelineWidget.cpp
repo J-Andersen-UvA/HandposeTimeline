@@ -1101,6 +1101,25 @@ void SHandposeTimelineWidget::refreshExtensions()
             widget->statusText->SetText(text);
         }
     };
+    context.scrubToFrame = [weakWidget](const int32 frame)
+    {
+        if (const TSharedPtr<SHandposeTimelineWidget> widget = weakWidget.Pin())
+        {
+            UAnimSequenceBase* animation = widget->loadedAnimation.Get();
+            if (animation != nullptr && animation->GetSamplingFrameRate().IsValid())
+            {
+                widget->onPlayheadScrubbed(static_cast<float>(
+                    animation->GetSamplingFrameRate().AsSeconds(frame)));
+            }
+        }
+    };
+    context.requestPreviewRebuild = [weakWidget](const bool preserveTime)
+    {
+        if (const TSharedPtr<SHandposeTimelineWidget> widget = weakWidget.Pin())
+        {
+            widget->rebuildPreviewAnimation(preserveTime);
+        }
+    };
 
     for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
     {
@@ -1111,7 +1130,7 @@ void SHandposeTimelineWidget::refreshExtensions()
 FReply SHandposeTimelineWidget::onExtensionToggleClicked(
     const TSharedRef<IHandposeTimelineExtension> extension)
 {
-    extension->setEnabled(!extension->isEnabled());
+    extension->onToolbarClicked();
     refreshExtensions();
     return FReply::Handled();
 }
@@ -1126,6 +1145,17 @@ FReply SHandposeTimelineWidget::OnPreviewKeyDown(
     }
     if (keyEvent.GetKey() == EKeys::Delete)
     {
+        if (const IHandposeTimelineModule* module =
+            FModuleManager::GetModulePtr<IHandposeTimelineModule>(TEXT("HandposeTimeline")))
+        {
+            for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
+            {
+                if (extension->isEnabled() && extension->deleteSelection())
+                {
+                    return FReply::Handled();
+                }
+            }
+        }
         const TArray<FFaceTouchCorrectionBlock>& corrections =
             getFaceTouchCorrections(selectedHandSide);
         const int32 selectedCorrectionIndex =
@@ -2338,6 +2368,7 @@ void SHandposeTimelineWidget::onZoomWheel(const float wheelDelta)
 void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 {
     resetWording();
+    invalidateCandidateCache();
     loadedAnimation = animation;
     previewAnimation.Reset();
     playbackController->setAnimation(animation);
@@ -2359,6 +2390,7 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
         ? FMath::Max(0, animation->GetNumberOfSampledKeys() - 1)
         : 0;
     applyPlaybackRange();
+    refreshExtensions();
 
     if (animation == nullptr)
     {
@@ -2402,6 +2434,7 @@ void SHandposeTimelineWidget::loadAnimation(UAnimSequenceBase* animation)
 void SHandposeTimelineWidget::resetSession()
 {
     resetWording();
+    invalidateCandidateCache();
     if (const TSharedPtr<SWindow> pickerWindow = handshapePickerWindow.Pin())
     {
         pickerWindow->RequestDestroyWindow();
@@ -2507,6 +2540,15 @@ bool SHandposeTimelineWidget::generateSegments(
 
 void SHandposeTimelineWidget::loadConfig(UHandposeTimelineConfig* config)
 {
+    if (loadedConfig.Get() != config)
+    {
+        invalidateHandposeCatalogCache();
+        if (const TSharedPtr<SWindow> pickerWindow = handshapePickerWindow.Pin())
+        {
+            pickerWindow->RequestDestroyWindow();
+        }
+        handshapePickerWindow.Reset();
+    }
     loadedConfig.Reset(config);
     if (config == nullptr)
     {
@@ -2844,6 +2886,99 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
     const FHandposeTimelineSegment& segment,
     FString& errorMessage) const
 {
+    const FString cacheKey = FString::Printf(
+        TEXT("%d:%d:%d"),
+        static_cast<int32>(handSide),
+        segment.startFrame,
+        segment.endFrame);
+    if (const TArray<FHandshapeCandidate>* cached = cachedCandidates.Find(cacheKey))
+    {
+        errorMessage = cachedCandidateErrors.FindRef(cacheKey);
+        return *cached;
+    }
+
+    FString generatedError;
+    TArray<FHandshapeCandidate> candidates = buildCandidatesForSegment(
+        handSide,
+        segment,
+        generatedError);
+    cachedCandidates.Add(cacheKey, candidates);
+    cachedCandidateErrors.Add(cacheKey, generatedError);
+    errorMessage = MoveTemp(generatedError);
+    return candidates;
+}
+
+void SHandposeTimelineWidget::ensureHandposeCatalogCache() const
+{
+    UHandposeTimelineConfig* config = loadedConfig.Get();
+    if (handposeCatalogCacheInitialized && cachedHandposeConfig.Get() == config)
+    {
+        return;
+    }
+
+    cachedHandposeAssets.Reset();
+    cachedPredictionHandposes.Reset();
+    cachedPostProcessedHandposes.Reset();
+    cachedLegacyHandshapeAnimations.Reset();
+    cachedHandposeConfig = config;
+    handposeCatalogCacheInitialized = true;
+    if (config == nullptr)
+    {
+        return;
+    }
+
+    for (const TSoftObjectPtr<UHandposeAsset>& assetReference : config->getHandposeAssets())
+    {
+        UHandposeAsset* handposeAsset = assetReference.LoadSynchronous();
+        if (handposeAsset == nullptr || !handposeAsset->isValid())
+        {
+            continue;
+        }
+        UAnimSequence* predictionHandpose = handposeAsset->predictionHandpose.LoadSynchronous();
+        UAnimSequence* postProcessedHandpose =
+            handposeAsset->postProcessedHandpose.LoadSynchronous();
+        if (predictionHandpose == nullptr || postProcessedHandpose == nullptr)
+        {
+            continue;
+        }
+        cachedHandposeAssets.Emplace(handposeAsset);
+        cachedPredictionHandposes.Emplace(predictionHandpose);
+        cachedPostProcessedHandposes.Emplace(postProcessedHandpose);
+    }
+
+    for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
+    {
+        if (UAnimSequence* handshapeAnimation = handshapeReference.LoadSynchronous())
+        {
+            cachedLegacyHandshapeAnimations.Emplace(handshapeAnimation);
+        }
+    }
+}
+
+void SHandposeTimelineWidget::invalidateHandposeCatalogCache()
+{
+    invalidateCandidateCache();
+    cachedHandposeConfig.Reset();
+    handposeCatalogCacheInitialized = false;
+    cachedHandposeAssets.Reset();
+    cachedPredictionHandposes.Reset();
+    cachedPostProcessedHandposes.Reset();
+    cachedLegacyHandshapeAnimations.Reset();
+}
+
+void SHandposeTimelineWidget::invalidateCandidateCache()
+{
+    cachedCandidates.Reset();
+    cachedCandidateErrors.Reset();
+    cachedMirroredMatchingSource.Reset();
+    cachedMirroredMatchingAnimation.Reset();
+}
+
+TArray<FHandshapeCandidate> SHandposeTimelineWidget::buildCandidatesForSegment(
+    const EHandposeSide handSide,
+    const FHandposeTimelineSegment& segment,
+    FString& errorMessage) const
+{
     TArray<FHandshapeCandidate> candidates;
     const UHandposeTimelineConfig* config = loadedConfig.Get();
     UAnimSequenceBase* animation = loadedAnimation.Get();
@@ -2863,58 +2998,49 @@ TArray<FHandshapeCandidate> SHandposeTimelineWidget::getCandidatesForSegment(
         ? EHandposeSide::Right
         : handSide;
     UAnimSequenceBase* matchingAnimation = animation;
-    TStrongObjectPtr<UAnimSequence> remappedMatchingAnimation;
     if (mirrorRightAssetsToLeft)
     {
-        const FHandposeMirrorResult remapResult =
-            FHandposeMirrorService::remapAnimationToOppositeHand(
-                Cast<UAnimSequence>(animation),
-                config->getBoneMapping(EHandposeSide::Left),
-                config->getBoneMapping(EHandposeSide::Right),
-                config->getHandposeMirrorFlipAxis());
-        if (!remapResult.success || remapResult.animation == nullptr)
+        if (cachedMirroredMatchingSource.Get() != animation ||
+            !cachedMirroredMatchingAnimation.IsValid())
         {
-            errorMessage = remapResult.errorMessage;
-            return candidates;
+            const FHandposeMirrorResult remapResult =
+                FHandposeMirrorService::remapAnimationToOppositeHand(
+                    Cast<UAnimSequence>(animation),
+                    config->getBoneMapping(EHandposeSide::Left),
+                    config->getBoneMapping(EHandposeSide::Right),
+                    config->getHandposeMirrorFlipAxis());
+            if (!remapResult.success || remapResult.animation == nullptr)
+            {
+                errorMessage = remapResult.errorMessage;
+                return candidates;
+            }
+            cachedMirroredMatchingSource = animation;
+            cachedMirroredMatchingAnimation.Reset(remapResult.animation);
         }
-        remappedMatchingAnimation.Reset(remapResult.animation);
-        matchingAnimation = remapResult.animation;
+        matchingAnimation = cachedMirroredMatchingAnimation.Get();
     }
 
+    ensureHandposeCatalogCache();
     TArray<UAnimSequenceBase*> handshapeAnimations;
     TMultiMap<UAnimSequenceBase*, UHandposeAsset*> assetsByPredictionHandpose;
-    for (const TSoftObjectPtr<UHandposeAsset>& assetReference : config->getHandposeAssets())
+    for (int32 assetIndex = 0; assetIndex < cachedHandposeAssets.Num(); ++assetIndex)
     {
-        UHandposeAsset* handposeAsset = assetReference.LoadSynchronous();
-        if (handposeAsset == nullptr || !handposeAsset->isValid())
-        {
-            continue;
-        }
+        UHandposeAsset* handposeAsset = cachedHandposeAssets[assetIndex].Get();
         if (handposeAsset->handSide != matchingSide)
         {
             continue;
         }
 
-        UAnimSequence* predictionHandpose = handposeAsset->predictionHandpose.LoadSynchronous();
-        UAnimSequence* postProcessedHandpose =
-            handposeAsset->postProcessedHandpose.LoadSynchronous();
-        if (predictionHandpose == nullptr || postProcessedHandpose == nullptr)
-        {
-            continue;
-        }
-
+        UAnimSequence* predictionHandpose = cachedPredictionHandposes[assetIndex].Get();
         handshapeAnimations.AddUnique(predictionHandpose);
         assetsByPredictionHandpose.Add(predictionHandpose, handposeAsset);
     }
-    for (const TSoftObjectPtr<UAnimSequence>& handshapeReference : config->getHandshapePoses())
+    if (matchingSide == EHandposeSide::Right)
     {
-        if (matchingSide != EHandposeSide::Right)
+        for (const TStrongObjectPtr<UAnimSequence>& handshapeAnimation :
+            cachedLegacyHandshapeAnimations)
         {
-            break;
-        }
-        if (UAnimSequence* handshapeAnimation = handshapeReference.LoadSynchronous())
-        {
-            handshapeAnimations.AddUnique(handshapeAnimation);
+            handshapeAnimations.AddUnique(handshapeAnimation.Get());
         }
     }
     if (handshapeAnimations.IsEmpty())
@@ -3070,10 +3196,20 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
     TArray<FFaceTouchCorrectionBlock> faceTouchCorrections =
         rightFaceTouchCorrections;
     faceTouchCorrections.Append(leftFaceTouchCorrections);
+    bool hasExtensionChanges = false;
+    if (const IHandposeTimelineModule* module =
+        FModuleManager::GetModulePtr<IHandposeTimelineModule>(TEXT("HandposeTimeline")))
+    {
+        for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
+        {
+            hasExtensionChanges |= extension->isEnabled() && extension->hasPreviewChanges();
+        }
+    }
     if (sourceAnimation == nullptr ||
         (assignments.IsEmpty() &&
             faceTouchCorrections.IsEmpty() &&
             !hasWording() &&
+            !hasExtensionChanges &&
             !rotate180Enabled &&
             !animationPlacementEnabled))
     {
@@ -3203,6 +3339,29 @@ void SHandposeTimelineWidget::rebuildPreviewAnimation(const bool preserveTime)
         previewSource = wordingPreview;
     }
 
+    if (hasExtensionChanges)
+    {
+        if (const IHandposeTimelineModule* module =
+            FModuleManager::GetModulePtr<IHandposeTimelineModule>(TEXT("HandposeTimeline")))
+        {
+            for (const TSharedRef<IHandposeTimelineExtension>& extension : module->getExtensions())
+            {
+                if (!extension->isEnabled() || !extension->hasPreviewChanges())
+                {
+                    continue;
+                }
+                FString error;
+                UAnimSequence* extensionPreview = extension->buildPreview(*previewSource, error);
+                if (extensionPreview == nullptr)
+                {
+                    statusText->SetText(FText::FromString(error));
+                    return;
+                }
+                previewSource = extensionPreview;
+            }
+        }
+    }
+
     previewAnimation.Reset(previewSource);
     playbackController->setAnimation(previewAnimation.Get());
     applyPlaybackRange();
@@ -3308,6 +3467,7 @@ void SHandposeTimelineWidget::refreshTimeline()
             leftFaceTouchCorrections,
             selectedLeftFaceTouchCorrectionIndex);
     }
+    refreshExtensions();
 }
 
 TArray<FHandposeTimelineSegment>& SHandposeTimelineWidget::getSegments(

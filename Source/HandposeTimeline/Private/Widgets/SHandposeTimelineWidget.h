@@ -155,6 +155,13 @@ private:
         EHandposeSide handSide,
         const FHandposeTimelineSegment& segment,
         FString& errorMessage) const;
+    TArray<FHandshapeCandidate> buildCandidatesForSegment(
+        EHandposeSide handSide,
+        const FHandposeTimelineSegment& segment,
+        FString& errorMessage) const;
+    void ensureHandposeCatalogCache() const;
+    void invalidateHandposeCatalogCache();
+    void invalidateCandidateCache();
     bool generateSegments(
         UAnimSequenceBase& animation,
         EHandposeSide handSide,
@@ -186,6 +193,16 @@ private:
     TWeakObjectPtr<UAnimSequenceBase> loadedAnimation;
     TStrongObjectPtr<UAnimSequence> previewAnimation;
     TStrongObjectPtr<UHandposeTimelineConfig> loadedConfig;
+    mutable TWeakObjectPtr<UHandposeTimelineConfig> cachedHandposeConfig;
+    mutable bool handposeCatalogCacheInitialized = false;
+    mutable TArray<TStrongObjectPtr<UHandposeAsset>> cachedHandposeAssets;
+    mutable TArray<TStrongObjectPtr<UAnimSequence>> cachedPredictionHandposes;
+    mutable TArray<TStrongObjectPtr<UAnimSequence>> cachedPostProcessedHandposes;
+    mutable TArray<TStrongObjectPtr<UAnimSequence>> cachedLegacyHandshapeAnimations;
+    mutable TMap<FString, TArray<FHandshapeCandidate>> cachedCandidates;
+    mutable TMap<FString, FString> cachedCandidateErrors;
+    mutable TWeakObjectPtr<UAnimSequenceBase> cachedMirroredMatchingSource;
+    mutable TStrongObjectPtr<UAnimSequence> cachedMirroredMatchingAnimation;
     TArray<FHandposeTimelineSegment> rightSegments;
     TArray<FHandposeTimelineSegment> leftSegments;
     TArray<FHandposeAssignment> rightAssignments;

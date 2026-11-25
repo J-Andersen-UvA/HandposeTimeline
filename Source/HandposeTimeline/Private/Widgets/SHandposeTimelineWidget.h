@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnimationPlacementService.h"
+#include "Components/AudioComponent.h"
 #include "FaceTouchCorrectionTypes.h"
 #include "HandposeAssignment.h"
 #include "HandshapeCandidate.h"
@@ -21,7 +22,6 @@ class STextBlock;
 class SVerticalBox;
 class SWindow;
 class UAnimSequence;
-class UAudioComponent;
 class UAnimSequenceBase;
 class UHandposeTimelineConfig;
 struct FHandposeDecisionDataResult;

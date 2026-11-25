@@ -52,6 +52,7 @@
 #include "Widgets/SHandshapePickerWidget.h"
 #include "Widgets/SAnimationPlacementSettingsWidget.h"
 #include "Widgets/SHandposeFingerSelectionWidget.h"
+#include "Widgets/SHandposeTimelineRuler.h"
 #include "Widgets/SHandposeTimelineTrack.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -495,9 +496,9 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     [
-                        SNew(SVerticalBox)
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
+                        SNew(SUniformGridPanel)
+                        .SlotPadding(FMargin(2.0f))
+                        + SUniformGridPanel::Slot(0, 0)
                         [
                             makeToolbarButton(
                                 TEXT("Icons.Edit"),
@@ -510,9 +511,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                     &SHandposeTimelineWidget::onFaceTouchCorrectionModeClicked),
                                 faceTouchButtonColor)
                         ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        + SUniformGridPanel::Slot(1, 0)
                         [
                             makeToolbarButton(
                                 TEXT("Icons.Transform"),
@@ -525,9 +524,7 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                     &SHandposeTimelineWidget::onRotate180Clicked),
                                 rotate180ButtonColor)
                         ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        + SUniformGridPanel::Slot(0, 1)
                         [
                             makeToolbarButton(
                                 TEXT("Icons.Transform"),
@@ -540,23 +537,26 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                                     &SHandposeTimelineWidget::onAnimationPlacementClicked),
                                 animationPlacementButtonColor)
                         ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                        + SUniformGridPanel::Slot(1, 1)
                         [
-                            SNew(SBox)
-                            .Visibility_Lambda([] { return Wording::available() ? EVisibility::Visible : EVisibility::Collapsed; })
+                            SNew(SVerticalBox)
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
                             [
-                                SNew(SButton)
-                                .Text(LOCTEXT("CorrectWording", "Correct Wording"))
-                                .OnClicked(this, &SHandposeTimelineWidget::onCorrectWordingClicked)
+                                SAssignNew(extensionToolbarBox, SVerticalBox)
                             ]
-                        ]
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-                        [
-                            SAssignNew(extensionToolbarBox, SVerticalBox)
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                            [
+                                SNew(SBox)
+                                .Visibility_Lambda([] { return Wording::available() ? EVisibility::Visible : EVisibility::Collapsed; })
+                                [
+                                    SNew(SButton)
+                                    .Text(LOCTEXT("CorrectWording", "Correct Wording"))
+                                    .OnClicked(this, &SHandposeTimelineWidget::onCorrectWordingClicked)
+                                ]
+                            ]
                         ]
                     ]
                 ]
@@ -913,60 +913,73 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
             .Orientation(Orient_Horizontal)
             + SScrollBox::Slot()
             [
-                SAssignNew(verticalTimelineScrollBox, SHandposeTimelineVerticalScrollBox)
-                .Orientation(Orient_Vertical)
-                + SScrollBox::Slot()
-                .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(12.0f, 0.0f)
                 [
-                    SAssignNew(rightTimelineTrack, SHandposeTimelineTrack)
-                    .HandSide(EHandposeSide::Right)
+                    SAssignNew(globalFrameRuler, SHandposeTimelineRuler)
                     .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
-                    .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
                     .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
-                    .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
-                    .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
-                    .OnAssignmentFingerEditRequested(
-                        this,
-                        &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
-                    .OnFaceTouchCorrectionSelected(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
-                    .OnFaceTouchCorrectionChanged(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
-                    .OnFaceTouchCorrectionEditRequested(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
                 ]
-                + SScrollBox::Slot()
+                + SVerticalBox::Slot()
+                .FillHeight(1.0f)
                 [
-                    makeWordingLane()
-                ]
-                + SScrollBox::Slot()
-                [
-                    SAssignNew(extensionLaneBox, SVerticalBox)
-                ]
-                + SScrollBox::Slot()
-                [
-                    SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
-                    .HandSide(EHandposeSide::Left)
-                    .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
-                    .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
-                    .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
-                    .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
-                    .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
-                    .OnAssignmentFingerEditRequested(
-                        this,
-                        &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
-                    .OnFaceTouchCorrectionSelected(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
-                    .OnFaceTouchCorrectionChanged(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
-                    .OnFaceTouchCorrectionEditRequested(
-                        this,
-                        &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
+                    SAssignNew(verticalTimelineScrollBox, SHandposeTimelineVerticalScrollBox)
+                    .Orientation(Orient_Vertical)
+                    + SScrollBox::Slot()
+                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                    [
+                        SAssignNew(rightTimelineTrack, SHandposeTimelineTrack)
+                        .HandSide(EHandposeSide::Right)
+                        .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
+                        .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
+                        .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+                        .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
+                        .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
+                        .OnAssignmentFingerEditRequested(
+                            this,
+                            &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                        .OnFaceTouchCorrectionSelected(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
+                        .OnFaceTouchCorrectionChanged(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
+                        .OnFaceTouchCorrectionEditRequested(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
+                    ]
+                    + SScrollBox::Slot()
+                    [
+                        makeWordingLane()
+                    ]
+                    + SScrollBox::Slot()
+                    [
+                        SAssignNew(extensionLaneBox, SVerticalBox)
+                    ]
+                    + SScrollBox::Slot()
+                    [
+                        SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
+                        .HandSide(EHandposeSide::Left)
+                        .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
+                        .OnSegmentSelected(this, &SHandposeTimelineWidget::onSegmentSelected)
+                        .OnScrubbed(this, &SHandposeTimelineWidget::onPlayheadScrubbed)
+                        .OnAssignmentSelected(this, &SHandposeTimelineWidget::onAssignmentSelected)
+                        .OnAssignmentChanged(this, &SHandposeTimelineWidget::onAssignmentChanged)
+                        .OnAssignmentFingerEditRequested(
+                            this,
+                            &SHandposeTimelineWidget::onAssignmentFingerEditRequested)
+                        .OnFaceTouchCorrectionSelected(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionSelected)
+                        .OnFaceTouchCorrectionChanged(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionChanged)
+                        .OnFaceTouchCorrectionEditRequested(
+                            this,
+                            &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
+                    ]
                 ]
             ]
         ]
@@ -3437,6 +3450,15 @@ void SHandposeTimelineWidget::updateAssignmentCoverage(
 void SHandposeTimelineWidget::refreshTimeline()
 {
     refreshWording();
+    if (globalFrameRuler.IsValid())
+    {
+        globalFrameRuler->setTimeline(
+            loadedAnimation.Get(),
+            rightSegments,
+            timelineZoom,
+            trimStartFrame,
+            trimEndFrame);
+    }
     if (rightTimelineTrack.IsValid())
     {
         rightTimelineTrack->setTimeline(

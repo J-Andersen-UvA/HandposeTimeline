@@ -20,10 +20,14 @@ void SHandposeTimelineRuler::Construct(const FArguments& arguments)
 void SHandposeTimelineRuler::setTimeline(
     UAnimSequenceBase* newAnimation,
     const TArray<FHandposeTimelineSegment>& segments,
-    const float zoom)
+    const float zoom,
+    const int32 newTrimStartFrame,
+    const int32 newTrimEndFrame)
 {
     animation = newAnimation;
     layout.setTimeline(newAnimation, segments, zoom);
+    trimStartFrame = FMath::Clamp(newTrimStartFrame, 0, layout.getLastFrame());
+    trimEndFrame = FMath::Clamp(newTrimEndFrame, trimStartFrame, layout.getLastFrame());
     Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
@@ -63,6 +67,45 @@ int32 SHandposeTimelineRuler::OnPaint(
         brush,
         drawEffects,
         FLinearColor(0.35f, 0.35f, 0.35f, 1.0f));
+
+    const float trimStartX = layout.getOffsetAtFrame(trimStartFrame);
+    const float trimEndX = layout.getOffsetAtFrame(trimEndFrame + 1);
+    if (trimStartX > 0.0f)
+    {
+        FSlateDrawElement::MakeBox(
+            outDrawElements,
+            layerId + 1,
+            allottedGeometry.ToPaintGeometry(
+                FVector2D(trimStartX, rulerHeight),
+                FSlateLayoutTransform(FVector2D::ZeroVector)),
+            brush,
+            drawEffects,
+            FLinearColor(0.015f, 0.015f, 0.015f, 0.72f));
+    }
+    if (trimEndX < width)
+    {
+        FSlateDrawElement::MakeBox(
+            outDrawElements,
+            layerId + 1,
+            allottedGeometry.ToPaintGeometry(
+                FVector2D(width - trimEndX, rulerHeight),
+                FSlateLayoutTransform(FVector2D(trimEndX, 0.0f))),
+            brush,
+            drawEffects,
+            FLinearColor(0.015f, 0.015f, 0.015f, 0.72f));
+    }
+    for (const float trimX : {trimStartX, trimEndX})
+    {
+        FSlateDrawElement::MakeBox(
+            outDrawElements,
+            layerId + 3,
+            allottedGeometry.ToPaintGeometry(
+                FVector2D(2.0f, rulerHeight),
+                FSlateLayoutTransform(FVector2D(trimX - 1.0f, 0.0f))),
+            brush,
+            drawEffects,
+            FLinearColor(0.15f, 0.65f, 0.95f, 0.95f));
+    }
 
     const int32 lastFrame = layout.getLastFrame();
     const int32 tickInterval = getTickInterval(width);

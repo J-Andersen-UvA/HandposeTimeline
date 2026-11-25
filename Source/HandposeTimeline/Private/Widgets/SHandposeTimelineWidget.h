@@ -17,6 +17,7 @@ class FHandposeTimelinePlaybackController;
 class IHandposeTimelineExtension;
 class AActor;
 class SScrollBox;
+class SHandposeTimelineRuler;
 class SHandposeTimelineTrack;
 class STextBlock;
 class SVerticalBox;
@@ -244,6 +245,7 @@ private:
     FAnimationPlacementLegChain leftLegPlacement;
     FAnimationPlacementLegChain rightLegPlacement;
     TSharedPtr<SScrollBox> horizontalTimelineScrollBox;
+    TSharedPtr<SHandposeTimelineRuler> globalFrameRuler;
     TSharedPtr<SVerticalBox> extensionToolbarBox;
     TSharedPtr<SVerticalBox> extensionLaneBox;
     TSharedPtr<SHandposeTimelineTrack> rightTimelineTrack;

@@ -123,14 +123,16 @@ bool FHandposeTimelineModule::bakeCurrentAnimation(
     UAnimSequence*& outputAnimation,
     FString& outputPath,
     FString& errorMessage,
-    bool& cancelled)
+    bool& cancelled,
+    const FString& outputFolderOverride)
 {
     const TSharedPtr<SHandposeTimelineWidget> widget = handposeTimelineWidget.Pin();
     return widget.IsValid() && widget->bakeCurrentAnimation(
         outputAnimation,
         outputPath,
         errorMessage,
-        cancelled);
+        cancelled,
+        outputFolderOverride);
 }
 
 UAnimSequenceBase* FHandposeTimelineModule::getLoadedAnimation() const

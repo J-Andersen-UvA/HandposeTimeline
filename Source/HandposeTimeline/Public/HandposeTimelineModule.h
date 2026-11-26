@@ -23,7 +23,8 @@ public:
         UAnimSequence*& outputAnimation,
         FString& outputPath,
         FString& errorMessage,
-        bool& cancelled) = 0;
+        bool& cancelled,
+        const FString& outputFolderOverride = FString()) = 0;
     virtual UAnimSequenceBase* getLoadedAnimation() const = 0;
     virtual void registerExtension(
         const TSharedRef<IHandposeTimelineExtension>& extension) = 0;
@@ -47,7 +48,8 @@ public:
         UAnimSequence*& outputAnimation,
         FString& outputPath,
         FString& errorMessage,
-        bool& cancelled) override;
+        bool& cancelled,
+        const FString& outputFolderOverride = FString()) override;
     virtual UAnimSequenceBase* getLoadedAnimation() const override;
     virtual void registerExtension(
         const TSharedRef<IHandposeTimelineExtension>& extension) override;

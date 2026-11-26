@@ -956,10 +956,6 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                     ]
                     + SScrollBox::Slot()
                     [
-                        SAssignNew(extensionLaneBox, SVerticalBox)
-                    ]
-                    + SScrollBox::Slot()
-                    [
                         SAssignNew(leftTimelineTrack, SHandposeTimelineTrack)
                         .HandSide(EHandposeSide::Left)
                         .CurrentTimeSeconds(this, &SHandposeTimelineWidget::getCurrentTimeSeconds)
@@ -979,6 +975,10 @@ void SHandposeTimelineWidget::Construct(const FArguments& arguments)
                         .OnFaceTouchCorrectionEditRequested(
                             this,
                             &SHandposeTimelineWidget::onFaceTouchCorrectionEditRequested)
+                    ]
+                    + SScrollBox::Slot()
+                    [
+                        SAssignNew(extensionLaneBox, SVerticalBox)
                     ]
                 ]
             ]
@@ -1587,7 +1587,8 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
     UAnimSequence*& outputAnimation,
     FString& outputPath,
     FString& errorMessage,
-    bool& cancelled)
+    bool& cancelled,
+    const FString& outputFolderOverride)
 {
     outputAnimation = nullptr;
     outputPath.Reset();
@@ -1626,7 +1627,9 @@ bool SHandposeTimelineWidget::bakeCurrentAnimation(
     const FHandposeBakeResult result = FHandposeBakeService::bake(
         previewAnimation.IsValid() ? previewAnimation.Get() : sourceAnimation,
         sourceAnimation,
-        config->getBakedAnimationOutputPath(),
+        outputFolderOverride.IsEmpty()
+            ? config->getBakedAnimationOutputPath()
+            : outputFolderOverride,
         trimStartFrame,
         trimEndFrame);
     outputAnimation = result.animation;

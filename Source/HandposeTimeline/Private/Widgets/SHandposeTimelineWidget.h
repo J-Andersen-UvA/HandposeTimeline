@@ -62,7 +62,8 @@ public:
         UAnimSequence*& outputAnimation,
         FString& outputPath,
         FString& errorMessage,
-        bool& cancelled);
+        bool& cancelled,
+        const FString& outputFolderOverride = FString());
     UAnimSequenceBase* getLoadedAnimation() const;
     void rebuildExtensions();
 
